@@ -1,0 +1,5 @@
+// import {
+//   "hnlyxiaobing/apk" @lib,
+// }
+
+pkgtype(kind: "executable")
