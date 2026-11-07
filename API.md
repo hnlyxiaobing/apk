@@ -1,7 +1,16 @@
 # apk · 公开 API（API.md）
 
-> 与 `pkg.generated.mbti` 一致。全部函数为 `declare`（**无实现**，预期 `0068` 告警）。
+> 与 `pkg.generated.mbti` 逐项对账（R2 冻结前整改，2026-11-07）。**全部函数为真实实现**，
+> 包内**没有 `declare` 存根**；`moon check --deny-warn` 0 error / 0 warning（原 `0068` 已消失）。
 > 错误传播统一 `raise ApkError`；只产出字节与索引，**不返回任何下游解析类型**。
+>
+> **依赖**：`bobzhang/zip@0.1.2`（Apache-2.0，仅用其 `deflate` 解压，`moon.mod` 已锁版）。
+> 五门槛审计（用途/许可/平台/维护通过；风险登记：单人维护、star=0、低 bus factor，不阻断）
+> 见 `../docs/adr/ADR-0010-dependency-policy-and-version-lock.md` §2 与 `../COMPATIBILITY.md`（归 WP-F）。
+>
+> **API 冻结前追认（决策点 7 的加法性追认）**：`pub impl ContainerIndex for Apk`（`entry` / `entries`）
+> —— R1 评审后补入 `pkg.generated.mbti` 的**加法性**变更，不改动既有签名，语义与 `Apk::entry` /
+> `Apk::entries` 完全一致；标注为**冻结前追认**，冻结后新增实现视为破坏性变更。
 
 ## 类型
 
@@ -14,7 +23,7 @@
 | `Abi` / `SignatureScheme` | `pub(all) enum` | ArmeabiV7a / Arm64V8a / X86 / X86_64 / Unknown；V1/V2/V3/V31 |
 | `ApkError` | `pub suberror` | 8 个错误构造 |
 | `EntryName` | `pub type` | `String` 别名 |
-| `ContainerIndex` | `pub trait` | `entry` / `entries` 契约 |
+| `ContainerIndex` | `pub trait` | `entry` / `entries` 契约；`pub impl ContainerIndex for Apk`（**冻结前追认**，见文首） |
 
 ## 函数签名
 
@@ -39,4 +48,14 @@
 
 ## 状态
 
-`moon check`：✅ 0 error，8 × `0068`。API 快照：`pkg.generated.mbti`。实现：❌ 后续轮。
+| 门禁 | 结果 |
+|---|---|
+| `moon check --deny-warn` | ✅ 0 error / 0 warning（无 `0068`） |
+| `moon build` | ✅ |
+| `moon test` | ✅ 42 / 42（含 R2 WP-G 真实样本冒烟 2 例、黄金差分 2 例、畸形派生 5 例；另有 2 个 `#skip` 用例不计入） |
+| `moon fmt --check` | ✅ |
+
+黄金差分（`fixtures/golden/golden-diff.ps1`）：tvshell-debug 与 base 两样本**工具侧 + 解析侧全通（退出码 0）**；
+phone-1.6.0 / tv-2.6.1 许可不明未入库，仅工具侧黄金、解析侧 SKIPPED（退出码 78）。
+manifest 语义字段（package/version/sdk/permissions/activity）的解析侧差分由 **axml 链**承担（ADR-0003）。
+API 快照：`pkg.generated.mbti`（`moon info` 由主控统一执行）。

@@ -2,7 +2,7 @@
 
 **APK 容器层解析库 —— ZIP 目录索引、签名块、manifest 引用、dex 列表与 native 库 ABI 归类。**
 
-> 状态：**Round-1 架构与声明可评审**。已写入数据结构与 `declare` 签名，`moon check` 0 error（8 条预期 `0068` 告警）。**无业务逻辑**。
+> 状态：**已实现并门禁全绿**（R2 冻结前整改 2026-11-07 复核）。`moon check --deny-warn` 0 error / 0 warning（原 8 条 `0068` 已消失）；`moon test` 42/42（含 R2 WP-G 新增的真实样本与畸形派生用例）。
 
 ## 定位与为什么存在
 
@@ -14,7 +14,7 @@
 
 - **做**：ZIP 中央目录索引（EOCD / ZIP64 / 对齐）、APK Signing Block 定位与 v1/v2/v3/v3.1 只读识别、`AndroidManifest.xml` 原始字节引用、`classes*.dex` 列表、`lib/<abi>/*.so` ABI 归类、`resources.arsc` 全局字符串池（简版）、按条目名惰性解压。
 - **不做**：反编译、反汇编、manifest 语义解释、**签名写入**、打包、修改 ZIP、证书链密码学校验、`resources.arsc` 完整展开。
-- 签名块解析（原 APK-02）本轮只声明接口，实现延后到 W3。
+- **签名块**：APK Signing Block 定位与 v1/v2/v3/v3.1 **只读识别**已实现（`SignatureInfo.verified` 恒为 `false`，不做密码学校验）。
 
 ## 公开接口（速览）
 
@@ -22,8 +22,7 @@
 
 ## 依赖
 
-- **本轮零依赖**；独立 `moon.mod`，`moon check` 独立通过。
-- 后续轮：实现期计划复用 `bobzhang/zip@0.1.2`（Apache-2.0，纯 MoonBit，全后端）。**本轮未 `moon add`**，且该包的 ZIP64 / 中央目录容错能力需先验证（ADR-0010 门槛）。
+- 依赖：**`bobzhang/zip@0.1.2`**（Apache-2.0，纯 MoonBit，全后端）—— 已在 `moon.mod` `import` 锁版，仅使用其 `deflate` 解压（`moon.pkg` 引 `bobzhang/zip/deflate`）。五门槛审计结论（用途/许可/平台/维护通过；**风险登记：单人维护、star=0、低 bus factor，不阻断**）见 `../docs/adr/ADR-0010-dependency-policy-and-version-lock.md` §2 与 `../COMPATIBILITY.md`（均归 WP-F）。独立 `moon.mod`，`moon check` 独立通过。
 
 ## 平台与许可风险
 
@@ -34,18 +33,20 @@
 
 ## 测试与验收
 
-- **测试策略**：与 `aapt2 dump badging` 逐字段一致；dex 数量与 `lib/` ABI 目录断言；签名块魔数定位测试；ZIP64 / 畸形中央目录 / 条目缺失注入；`moon test --enable-coverage`。
-- **验收标准**（实现轮）：列出两个 APK 的 manifest 关键字段、dex 数量、lib 目录 ABI，与 aapt2 一致。
-- 依赖资产：真实 APK 不在本工作区（`docs/open-questions.md` Q1）。
+- **测试策略（现状）**：L0 程序化 fixture 33 例（stored/deflate 条目、签名块魔数、畸形中央目录、ZIP64 拒绝、对齐）；L1 真实样本内嵌（tvshell-debug.apk 21208 B、base.apk 1179 B）+ L2 黄金：`aapt2 dump badging` 规范化 `fixtures/golden/apk/*.badge.norm.txt` 与 .NET `ZipFile` 中央目录规范化 `*.apkparse.norm.txt`，与 `@apk.Apk` 输出逐字段差分；畸形派生 5 例（截断 / EOCD 污染 / CD 偏移污染 / CRC 污染 / 未知压缩方法，均断言报 `ApkError` 而非 panic）。由 `fixtures/golden/golden-diff.ps1` 驱动，tvshell-debug 与 base 两样本**工具侧+解析侧全通（退出码 0）**。
+- **验收状态**：条目清单 / DEX 列表 / manifest 与 `resources.arsc` 字节长 / ABI（`native-code`）与独立实现一致；**package / version / sdk / permissions / activity 属 manifest 语义，不在本模块范围（ADR-0003），其解析侧差分由 axml 链承担**。
+- 依赖资产：真实 APK 位于工作区外 `D:\MoonBit\motion_sensing_game\`；受控自建与 AOSP 来源已入库提取样本，目标游戏 APK（phone/tv/partyr）许可不明**仅登记哈希 + 黄金输出**。清单见 `../fixtures/golden/ASSETS.md` 与 `../docs/open-questions.md` §2.1。
 
 ## 当前状态 / 本轮产物
 
 | 项 | 状态 |
 |---|---|
-| `apk.mbt` 数据结构 + `declare` 签名 + 文档注释 | ✅ |
+| `apk.mbt` 数据结构 + 文档注释 | ✅ |
 | `pkg.generated.mbti` API 快照 | ✅ |
-| ZIP 索引 / 签名块 / 惰性解压逻辑 | ❌ 后续轮，`TODO(实现轮)` |
-| `moon check` | ✅ 0 error（8 × `0068`，预期） |
+| ZIP 索引 / 签名块 / 惰性解压 | ✅ 真实实现（无 `declare`） |
+| `ContainerIndex for Apk`（决策 7 加法性追认） | ✅ 见 `API.md` |
+| L1 真实样本 + L2 黄金 + 差分脚本 | ✅ R2 WP-G |
+| `moon check --deny-warn` / `moon build` / `moon test` / `moon fmt --check` | ✅ 全绿（42/42） |
 
 ## 本轮顺序说明
 
