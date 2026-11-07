@@ -162,8 +162,12 @@ fn sig_block_of(pairs : Array[(UInt32, Bytes)]) -> Bytes {
 
 ///|
 /// 签名方案值（fixture）：signer 序列，cert 挂在 signed_data 的 certificates 下。
-/// `sd_prefix`：v2 = 0、v3 = 8（minSDK+maxSDK）、v3.1 = 12（+rotationMinSDK）。
-fn scheme_value(cert : Bytes, sd_prefix : Int32) -> Bytes {
+/// 布局对齐真实 APK Signing Block（v2/v3/v3.1 signer 顶层一致，与 apksigner 产物
+/// 同构）：signed_data = digests(=0) + certificates + minSDK/maxSDK 尾区(`sdk_tail`
+/// 字节) + additional_attributes(=0)。`sdk_tail`：v2 = 0、v3 = 8、v3.1 = 8
+/// （min/max SDK 在 signed_data 内部、certificates 之后；v3.1 的 rotationMinSDK
+/// 位于 additional_attributes，本 fixture attrs 为空）。
+fn scheme_value(cert : Bytes, sdk_tail : Int32) -> Bytes {
   let cs : Array[Byte] = []
   push_u32(cs, cert.length())
   push_bytes(cs, cert)
@@ -172,12 +176,12 @@ fn scheme_value(cert : Bytes, sd_prefix : Int32) -> Bytes {
   push_u32(sd, 0)
   push_u32(sd, cs_b.length())
   push_bytes(sd, cs_b)
+  for i = 0; i < sdk_tail; i = i + 1 {
+    sd.push(b'\x00')
+  }
   push_u32(sd, 0)
   let sd_b = Bytes::from_array(sd[:])
   let signer : Array[Byte] = []
-  for i = 0; i < sd_prefix; i = i + 1 {
-    signer.push(b'\x00')
-  }
   push_u32(signer, sd_b.length())
   push_bytes(signer, sd_b)
   push_u32(signer, 0)
@@ -425,7 +429,7 @@ test "signatures identifies v2 v3 v31 schemes with certificates" {
   pairs.push((0x42726577, b"padding"))
   pairs.push((0x7109871a, scheme_value(b"cert2", 0)))
   pairs.push((0xf05368c0, scheme_value(b"cert3", 8)))
-  pairs.push((0x1b93ad61, scheme_value(b"cert31", 12)))
+  pairs.push((0x1b93ad61, scheme_value(b"cert31", 8)))
   let apk = @apk.Apk::open(
     build_zip([zspec("ab.txt", b"hello")], Some(sig_block_of(pairs))),
   )

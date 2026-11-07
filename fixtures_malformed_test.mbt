@@ -220,3 +220,28 @@ test "apk malformed: 未知压缩方法报错" {
 test "apk malformed: 未知 chunk [SKIPPED: ZIP 无 chunk 概念]" {
   println("SKIPPED: ZIP 无 chunk；未知压缩方法用例见上")
 }
+
+///|
+/// 受控构建多 dex APK（WP-4 2026-11-07，v2/v3 变体）派生：截断 / EOCD 签名污染 /
+/// 中央目录偏移污染，同样只报 `ApkError` 而非 panic。样本性质：受控自产
+///（aapt2/d8/apksigner 构建），见 fixtures/golden/ASSETS.md。
+test "apk malformed: 多 dex APK 截断与目录污染报错且不 panic" {
+  let src = fixture_fx_multidex_v2v3_apk()
+  for cut in [0, 100, 6000, 12549] {
+    assert_true(
+      fx_open_raises(fx_cut(src, cut)),
+      msg="截断到 \{cut} 字节应报 ApkError",
+    )
+  }
+  let eocd = fx_find_eocd(src)
+  assert_true(eocd > 0, msg="能找到 EOCD")
+  assert_true(
+    fx_open_raises(fx_mut(src, eocd, b'\x00')),
+    msg="EOCD 签名污染应报 NotAZip",
+  )
+  let bad = fx_set_u32(src, eocd + 16, 0x00FFFFFF)
+  assert_true(
+    fx_open_raises(bad),
+    msg="CD 偏移越界应报 BadCentralDirectory",
+  )
+}

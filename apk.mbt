@@ -715,9 +715,12 @@ fn scheme_rank(s : SignatureScheme) -> Int32 {
 ///
 /// 布局（APK Signature Scheme v2/v3/v3.1）：
 /// value = u32 序列长 { u32 signer 长 signer }*；
-/// signer = [v3: minSDK+maxSDK | v3.1: minSDK+maxSDK+rotationMinSDK] + signed_data(长度前缀)
-///          + signatures(长度前缀序列) + public_key(长度前缀)；
-/// signed_data = digests(长度前缀序列) + certificates(长度前缀序列) + additional_attributes。
+/// signer = signed_data(长度前缀) + signatures(长度前缀序列) + public_key(长度前缀)；
+/// signed_data = digests(长度前缀序列) + certificates(长度前缀序列)
+///          + [v3/v3.1: minSDK(u32) + maxSDK(u32)] + additional_attributes。
+/// 即 v2/v3/v3.1 的 signer 顶层布局一致（sd_prefix = 0）；v3/v3.1 的
+/// min/max SDK（v3.1 另有 rotationMinSDK，位于 additional_attributes）在
+/// signed_data 内部、certificates 之后，不在 signer 顶层。
 /// 结构不合法一律 `BadSigningBlock`（不做任何静默降级）。
 fn extract_certs(
   source : Bytes,
@@ -742,8 +745,8 @@ fn extract_certs(
   pos = pos + 4
   let sd_prefix = match sch {
     SignatureScheme::V2 => 0
-    SignatureScheme::V3 => 8
-    SignatureScheme::V31 => 12
+    SignatureScheme::V3 => 0
+    SignatureScheme::V31 => 0
     SignatureScheme::V1 => 0
   }
   while pos < seq_end {
