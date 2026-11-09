@@ -1,13 +1,13 @@
 ///|
 /// APK 容器层解析库：ZIP 中央目录索引 + Android 专有结构定位。
 ///
-/// 契约决策（见 DECISIONS.md §1）：本库是「ZIP 目录 + 索引」，只产出原始字节、位置信息与
+/// 契约决策（见 docs/DECISIONS.md §1）：本库是「ZIP 目录 + 索引」，只产出原始字节、位置信息与
 /// apk 自有值类型，不编排 `axml` / `dex` 的解析结果。这样 `apk` 对下游格式零知识，逆向入参可任意组合。
 /// 不解析 AXML / DEX 语义、不写签名、不打包、不修改 ZIP。签名只做**结构 + 摘要**校验
-/// （不做 RSA/ECDSA 公钥验签；`verified` 语义见 `SignatureInfo` 与 DECISIONS.md §5）。
+/// （不做 RSA/ECDSA 公钥验签；`verified` 语义见 `SignatureInfo` 与 docs/DECISIONS.md §5）。
 ///
 /// ZIP 读取实现：EOCD / 中央目录 / local header 由本包解析（所有错误携带目录偏移或条目名），
-/// DEFLATE 解压复用文档授权依赖 `bobzhang/zip/deflate`（Apache-2.0，审计见 DECISIONS.md §3）。
+/// DEFLATE 解压复用文档授权依赖 `bobzhang/zip/deflate`（Apache-2.0，审计见 docs/DECISIONS.md §3）。
 /// ZIP64 一律拒绝（`Zip64Unsupported`），符合 `ApkError` 契约。
 
 ///|

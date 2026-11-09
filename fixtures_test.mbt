@@ -8,7 +8,7 @@
 //        aapt2 dump badging 规范化黄金
 //
 // 边界说明：package / version / sdk / permissions / activity 等 manifest 语义字段
-//   **不在 apk 模块范围**（`apk` 只做容器，见 DECISIONS.md §1），其解析侧差分由 axml 解析器承担；
+//   **不在 apk 模块范围**（`apk` 只做容器，见 docs/DECISIONS.md §1），其解析侧差分由 axml 解析器承担；
 //   本链覆盖条目清单、DEX 列表、manifest/resources.arsc 字节与 ABI（native-code）。
 //
 // skip 机制：MoonBit 原生 `#skip` 属性（默认不计入 Total tests；
@@ -343,7 +343,7 @@ test "golden apk sig fx-multidex-v2v3" {
 ///|
 /// 真实签名样本的**摘要**校验：tvshell-debug（v1+v2+v3，apksigner 实测 `Verifies`）。
 /// 断言 `structure_ok && digest_ok`，同时 `signature_verified` 必须恒为 false
-///（本库不做 RSA/ECDSA 验签，边界见 API.md / DECISIONS.md §5）。
+///（本库不做 RSA/ECDSA 验签，边界见 docs/API.md / docs/DECISIONS.md §5）。
 test "signature digest checks real v1+v2+v3 tvshell-debug" {
   let a = @apk.Apk::open(fixture_tvshell_apk())
   let checks = a.signature_checks()

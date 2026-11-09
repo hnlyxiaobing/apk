@@ -87,9 +87,9 @@ APK Bytes ──► Apk::open ──► Apk(索引)
 | 层次 | 内容 |
 |---|---|---|
 | 黑盒（L0 程序化 fixture） | 签名块魔数、ZIP64 拒绝、4 字节对齐、stored/deflate 条目、畸形中央目录；合成 v1 签名（DER/MANIFEST 现场构造）；合成 arsc（package/typeSpec/type/三种 offset 编码/compact/complex bag/坏结构）；合成 ELF（5 种 ABI + 坏 ELF） | ✅ |
-| 黑盒（L1/L2 真实/受控样本） | 内嵌真实 `tvshell-debug.apk`（21208 B）与 `base.apk`（1179 B）及受控 `fx-multidex-*` 三变体；`aapt2 dump badging` + .NET `ZipFile` 中央目录规范化黄金 + `aapt2 dump resources` 资源表黄金 + `apksigner verify` 签名工具侧基准；期望值内嵌 `fixtures_test.mbt` / `arsc_test.mbt` | ✅ tvshell-debug、base、fx-multidex 三变体 |
-| 畸形派生（`fixtures_malformed_test.mbt`） | 截断 / EOCD 签名污染 / 中央目录偏移污染 / 条目 CRC 污染 / 未知压缩方法 / 多 dex 截断与目录污染；断言报 `ApkError` 而非 panic | ✅ 6 例 |
-| 白盒（`apk_wbtest.mbt`） | EOCD 定位、CRC-32、ABI/路径归类、SHA-256 NIST 向量 | ✅ |
+| 黑盒（L1/L2 真实/受控样本） | 内嵌真实 `tvshell-debug.apk`（21208 B）与 `base.apk`（1179 B）及受控 `fx-multidex-*` 三变体；`aapt2 dump badging` + .NET `ZipFile` 中央目录规范化黄金 + `aapt2 dump resources` 资源表黄金 + `apksigner verify` 签名工具侧基准；期望值内嵌 `../fixtures_test.mbt` / `../arsc_test.mbt` | ✅ tvshell-debug、base、fx-multidex 三变体 |
+| 畸形派生（`../fixtures_malformed_test.mbt`） | 截断 / EOCD 签名污染 / 中央目录偏移污染 / 条目 CRC 污染 / 未知压缩方法 / 多 dex 截断与目录污染；断言报 `ApkError` 而非 panic | ✅ 6 例 |
+| 白盒（`../apk_wbtest.mbt`） | EOCD 定位、CRC-32、ABI/路径归类、SHA-256 NIST 向量 | ✅ |
 | 门禁 | `moon fmt --check` / `moon check --deny-warn` / `moon build` / `moon test` / 快照 | ✅ 80/80 |
 
 skip 机制：MoonBit 原生 `#skip` 属性（默认不计入 `Total tests`；`moon test --include-skipped` 才执行）。
@@ -115,7 +115,7 @@ skip 机制：MoonBit 原生 `#skip` 属性（默认不计入 `Total tests`；`m
 
 ## 13. 当前状态与 TODO
 
-`apk.mbt` / `arsc.mbt` / `signature.mbt` / `crypto.mbt` 已实现全部类型与公开函数（**无 `declare`、无 `0068`**），
+`../apk.mbt` / `../arsc.mbt` / `../signature.mbt` / `../crypto.mbt` 已实现全部类型与公开函数（**无 `declare`、无 `0068`**），
 公开 API 有 `///` 文档注释；字段 `method` 已改名 `compression_method`（避开保留字）。
 `pub impl ContainerIndex for Apk` 为**冻结前追认**（API 冻结前的加法性变更，见 `API.md` 文首）。
 R4 的加法性 API：`SignatureCheck` / `Apk::signature_checks` / `ResTable` 系列 / `parse_resources_arsc` /
@@ -123,5 +123,5 @@ R4 的加法性 API：`SignatureCheck` / `Apk::signature_checks` / `ResTable` �
 
 ## References
 
-设计决策与依据见 `DECISIONS.md`；测试资产（来源 / 哈希 / 规范化口径）见 `tests/ASSETS.md`；
+设计决策与依据见 `DECISIONS.md`；测试资产（来源 / 哈希 / 规范化口径）见 `../tests/ASSETS.md`；
 APK Signing Block 规范：`https://source.android.com/docs/security/features/apksigning/v2`。

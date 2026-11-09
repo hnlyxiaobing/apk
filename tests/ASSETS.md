@@ -22,7 +22,7 @@
 > 以上 SHA-256 为开发期登记值，开发期以脚本比对「入库文件 == 来源资产 == 测试内嵌字节」
 > （测试代码 `fixtures_test.mbt` 内嵌同样字节的字面量）`[已复核]`。
 > 另注：`fx-multidex-unsigned.apk` 的 local 头 extra 区含 3B/2B 裸对齐填充（aapt2 生产者行为），
-> 是 ZIP 容器宽容度的常驻回归样本（见仓库根 `DECISIONS.md` §3）。
+> 是 ZIP 容器宽容度的常驻回归样本（见仓库根 `docs/DECISIONS.md` §3）。
 
 ## 2. 受控构建流水线（fx-multidex-* 三变体，可复现）
 
@@ -58,7 +58,7 @@ javac --release 11 → d8 --min-api 21（两个桶 → classes.dex / classes2.de
     无 `LIB` 行；非空 ABI 路径由测试内合成 ELF fixture 覆盖（`elf_test.mbt`）。**
 - **签名侧（sig）**：固定顺序 `SIG|V1|V2|V3|V31`，无任何签名方案时 `SIG|NONE`；工具侧基准为
   `apksigner verify --verbose`（min-sdk 21/24/28 三个仿真层并集）；解析侧为
-  `@apk.signatures()` 的方案存在性检测 + **结构/摘要**校验（`verified` 语义见 `DECISIONS.md` §5；
+  `@apk.signatures()` 的方案存在性检测 + **结构/摘要**校验（`verified` 语义见 `docs/DECISIONS.md` §5；
   **不做** RSA/ECDSA 验签，`signature_verified` 恒 false）。
 - **规范化原则**：只保留结构化字段，去掉行号、时间戳、绝对路径等易变文本。
 
@@ -69,7 +69,7 @@ javac --release 11 → d8 --min-api 21（两个桶 → classes.dex / classes2.de
 R4 新增两条工具侧独立基准：`resources.arsc` 完整展开 ↔ `aapt2 dump resources`（fx-multidex
 的 bool/color/string 三类型与 zh 配置逐值一致）；签名结构 + 摘要 ↔ `apksigner verify`
 （tvshell v1+v2+v3、fx-multidex-v1、fx-multidex-v2v3）。**注意**：签名侧只核对摘要，
-不做公钥验签（见 `DECISIONS.md` §5）。
+不做公钥验签（见 `docs/DECISIONS.md` §5）。
 
 ## 4. 未入库的第三方样本
 

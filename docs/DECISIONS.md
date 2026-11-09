@@ -77,7 +77,7 @@ AXML 格式（逆向工具链的合理知识）。
 
 ### 背景
 
-`apk` 与 `axml`、`dex` 等共 11 个项目**每个都有自己的 `moon.mod`**，是 11 个独立 MoonBit 模块
+`apk` 与 `axml`、`dex` 等共 11 个项目**每个都有自己的 `../moon.mod`**，是 11 个独立 MoonBit 模块
 （不是同一模块内的 11 个包）。MoonBit 是名义类型系统：两个模块里结构完全相同的 `struct`
 也不是同一类型。若把 `apk → axml + dex` 实现成编译期依赖，会产生循环依赖风险并把 `apk`
 变成中心节点。
@@ -101,7 +101,7 @@ AXML/DEX 解析器）；`moon check` 无外部依赖风险；避免模块循环�
 ### 后果
 
 **正面**：并行开发；ZIP 实现可换包而不改上层签名。
-**负面**：组合根需要少量显式适配代码；同构值类型存在结构漂移风险——由 `pkg.generated.mbti`
+**负面**：组合根需要少量显式适配代码；同构值类型存在结构漂移风险——由 `../pkg.generated.mbti`
 API 快照对比守护。
 **被替代方案**：合并为一个多包模块（破坏既有骨架，禁止）；发布到 mooncakes.io 后用真实
 import（引入版本耦合，暂不做）。
@@ -125,8 +125,8 @@ import（引入版本耦合，暂不做）。
 4. **平台**：`supported_targets` 与目标后端一致，不破坏独立 `moon check`；
 5. **风险**：登记风险与替代方案、移除成本（登记口径为「登记不阻断」）。
 
-版本锁定：依赖在 `moon.mod` 的 `import` 中钉死版本（本库为 `bobzhang/zip@0.1.2`）；
-`.mooncakes/` 是 moon 的本地依赖缓存目录，已被本仓库 `.gitignore` 忽略——**不入库、
+版本锁定：依赖在 `../moon.mod` 的 `import` 中钉死版本（本库为 `bobzhang/zip@0.1.2`）；
+`.mooncakes/` 是 moon 的本地依赖缓存目录，已被本仓库 `../.gitignore` 忽略——**不入库、
 不随仓库再分发**。
 
 ### `bobzhang/zip@0.1.2` 审计结论（2026-11-07 复验）
@@ -141,7 +141,7 @@ import（引入版本耦合，暂不做）。
   标注修改、保留 NOTICE（该包未附 NOTICE）。当前仅开发期依赖，`.mooncakes/` 不入库，
   仓库本身不构成再分发；打进 APK / 可执行产物时才触发。
 - **移除成本（低）**：只有 `apk` 一个模块 import、只用 `deflate` 一个子包；移除 = 改
-  `moon.mod` + `moon.pkg` + 解压路径，替换为自研 inflate 或改用存储条目策略，影响面不外溢。
+  `../moon.mod` + `../moon.pkg` + 解压路径，替换为自研 inflate 或改用存储条目策略，影响面不外溢。
 
 ### ZIP 容器兼容性风险（实测登记，已规避）
 
@@ -154,7 +154,7 @@ import（引入版本耦合，暂不做）。
   **不遍历 extra field 链**（对中央目录 extra 仅按 id 扫描检测 ZIP64），故对上述填充宽容；
   实测含该填充的真实大样本可正常读取。
 - **永久回归**：受控产物 `fx-multidex-*.apk`（其中 unsigned 变体即含 3B/2B 裸填充）常驻
-  `tests/fixtures/`，任何 ZIP 容器路径的实现改动必须过此回归样本（见 `tests/ASSETS.md`）。
+  `../tests/fixtures/`，任何 ZIP 容器路径的实现改动必须过此回归样本（见 `../tests/ASSETS.md`）。
 - **状态**：依赖结论（`bobzhang/zip@0.1.2` 维持现状、仅用 `deflate` 解压面）不变；
   上游修复建议（对 <4 字节 extra 尾部按对齐填充容忍）留档。
 
@@ -187,7 +187,7 @@ import（引入版本耦合，暂不做）。
 ### 后果
 
 各模块并行推进、互不阻塞；对组合根契约冻结的要求提高——并行实现前需先冻结 API，
-否则并行项会互相等待（本库以 `pkg.generated.mbti` API 快照 + `API.md` 对账落实）。
+否则并行项会互相等待（本库以 `../pkg.generated.mbti` API 快照 + `API.md` 对账落实）。
 
 ---
 
@@ -254,7 +254,7 @@ RSA/ECDSA/DSA 公钥运算，无法完成真正的验签。
 
 ### 决策
 
-- 在 `apk` 内新增**自有字节解析器**（`arsc.mbt`）与**自有值类型**（`ResTable` / `ResPackage` /
+- 在 `apk` 内新增**自有字节解析器**（`../arsc.mbt`）与**自有值类型**（`ResTable` / `ResPackage` /
   `ResTypeSpec` / `ResTypeConfig` / `ResEntry` / `ResBag` / `ResValue` / `ResConfig`），
   不 import、不调用、不返回 `axml` 的任何类型。
 - 新增 `Apk::resource_table_full()` 与 `parse_resources_arsc(Bytes)`；保留 `resource_table()`

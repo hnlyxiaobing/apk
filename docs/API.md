@@ -1,6 +1,6 @@
 # apk · 公开 API（API.md）
 
-> 与 `pkg.generated.mbti` 逐项对账（2026-11-09 R4）。**全部函数为真实实现**，
+> 与 `../pkg.generated.mbti` 逐项对账（2026-11-09 R4）。**全部函数为真实实现**，
 > 包内**没有 `declare` 存根**；`moon check --deny-warn` 0 error / 0 warning。
 > 错误传播统一 `raise ApkError`；只产出字节、索引与 apk 自有值类型，**不返回任何下游解析类型**。
 >
@@ -9,15 +9,15 @@
 > **它不代表签名有效**——本库无 RSA/ECDSA/DSA 公钥验签、无证书链校验；
 > `Apk::signature_checks()` 的 `signature_verified` 恒为 `false`。详见 `DECISIONS.md` §5。
 >
-> **依赖**：`bobzhang/zip@0.1.2`（Apache-2.0，仅用其 `deflate` 解压，`moon.mod` 已锁版）。
+> **依赖**：`bobzhang/zip@0.1.2`（Apache-2.0，仅用其 `deflate` 解压，`../moon.mod` 已锁版）。
 > 五门槛审计（用途/许可/平台/维护 4 项通过、0 不通过、1 项风险登记：单人维护、star=0、
 > 低 bus factor，登记不阻断）见 `DECISIONS.md` §3。
 >
 > **API 冻结前追认**：`pub impl ContainerIndex for Apk`（`entry` / `entries`）
-> —— 冻结评审后补入 `pkg.generated.mbti` 的**加法性**变更，不改动既有签名，语义与 `Apk::entry` /
+> —— 冻结评审后补入 `../pkg.generated.mbti` 的**加法性**变更，不改动既有签名，语义与 `Apk::entry` /
 > `Apk::entries` 完全一致；标注为**冻结前追认**，冻结后新增实现视为破坏性变更。
 >
-> **R4 加法性新增**（冻结语义见 `COMPATIBILITY.md` §10）：`SignatureCheck`、
+> **R4 加法性新增**（冻结语义见 `../../COMPATIBILITY.md` §10）：`SignatureCheck`、
 > `Apk::signature_checks`、`ResTable` / `ResPackage` / `ResTypeSpec` / `ResTypeConfig` /
 > `ResEntry` / `ResEntryValue` / `ResBag` / `ResMap` / `ResValue` / `ResConfig` / `ResDataType` /
 > `ResLookup`、`parse_resources_arsc`、`Apk::resource_table_full`、`ResConfig::is_default`、
@@ -88,4 +88,4 @@ tvshell-debug 与 base 两样本**工具侧 + 解析侧全通（退出码 0）**
 phone-1.6.0 / tv-2.6.1 许可不明未入库，开发期仅做工具侧复核，解析侧以 `#skip` 显式跳过。
 manifest 语义字段（package/version/sdk/permissions/activity）的解析侧差分由 **axml 解析器**承担
 （容器层不解释 manifest 语义，见 `DECISIONS.md` §1）。
-API 快照：`pkg.generated.mbti`（`moon info` 生成/更新）。
+API 快照：`../pkg.generated.mbti`（`moon info` 生成/更新）。
