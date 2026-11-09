@@ -111,7 +111,7 @@ skip 机制：MoonBit 原生 `#skip` 属性（默认不计入 `Total tests`；`m
 - 签名**公钥验签**未实现（无 RSA/ECDSA/DSA）；`verified` 仅为结构+摘要。SHA-512 / verity 内容摘要未实现；v3.1 与多签名者真实样本未覆盖 —— `[仍需实测]`。
 - 目标游戏 APK（phone/tv/partyr）许可不明、未入库 → 其容器解析侧差分 `[仍需实测]`。
 - 真实第三方 `.so`（含压缩/多架构/错标 ABI）的解析侧差分未执行 —— `[仍需实测]`；合成 ELF 只覆盖结构路径。
-- `apk` 与 `axml` 各有一份 arsc 解析器（`DECISIONS.md` §6），长期维护方式待主控裁决。
+- `apk` 与 `axml` 各有一份 arsc 解析器（`DECISIONS.md` §6），长期维护方式待本仓库维护者决定。
 
 ## 13. 当前状态与 TODO
 

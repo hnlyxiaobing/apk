@@ -17,7 +17,7 @@
 > —— 冻结评审后补入 `../pkg.generated.mbti` 的**加法性**变更，不改动既有签名，语义与 `Apk::entry` /
 > `Apk::entries` 完全一致；标注为**冻结前追认**，冻结后新增实现视为破坏性变更。
 >
-> **R4 加法性新增**（冻结语义见 `../../COMPATIBILITY.md` §10）：`SignatureCheck`、
+> **R4 加法性新增**（冻结语义见 本仓库 API 冻结约定（既有签名变更即破坏性变更；加法性新增须同步 `pkg.generated.mbti` 快照、在 `docs/API.md` 登记并经 CI 快照门禁校验））：`SignatureCheck`、
 > `Apk::signature_checks`、`ResTable` / `ResPackage` / `ResTypeSpec` / `ResTypeConfig` /
 > `ResEntry` / `ResEntryValue` / `ResBag` / `ResMap` / `ResValue` / `ResConfig` / `ResDataType` /
 > `ResLookup`、`parse_resources_arsc`、`Apk::resource_table_full`、`ResConfig::is_default`、
