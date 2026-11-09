@@ -23,11 +23,16 @@
 #   moonrun 0.1.20261104
 #   core    0.10.20+65efd5b93（以 ~/.moon/lib/core/moon.mod 为准）
 #
-# 本仓库依赖策略：
-#   - 禁止无版本 `moon update`：`moon update --help` 实测只有 --target-dir/-q/-v/--trace/--dry-run，
-#     没有任何锁定版本的参数，因此 CI 中一律不出现 `moon update`。
-#   - 依赖只按各模块 moon.mod 中已钉死的版本声明（例：bobzhang/zip@0.1.2）由 check/build 自动同步。
-#   - 如确需显式预取：`moon fetch <author>/<name>@<version> --no-update`（钉死版本且不刷新 registry 元数据）。
+# 本仓库依赖策略（2026-11-09 修订，修正原「check/build 自动同步」的错误假设）：
+#   - moon.mod 钉死精确版本（bobzhang/zip@0.1.2），版本不会漂移；漂移风险来自
+#     「无版本声明 + 更新到 latest」，本仓库不存在该形态（ADR-0010 的关切不受影响）。
+#   - 全新 checkout（GitHub runner）没有 ~/.moon/registry 索引，`moon check` 不会
+#     自动引导索引，会报 "module was not found in the registry"（2026-11-09 云上与
+#     本地冷启动均实测复现）；因此 CI 在门禁前执行一次 `moon update` 引导索引与
+#     symbols——它只同步 registry 元数据，不改写 moon.mod 声明，依赖版本仍按
+#     moon.mod 钉死值解析。
+#   - `moon fetch <author>/<name>@<version> --no-update` 在无索引的冷环境实测失败
+#     （os error 3，2026-11-09），不能用作冷启动引导，仅适用于已有索引的环境。
 #   - 不用 `moon build --frozen`：全新 checkout 没有本地依赖缓存，--frozen 会直接失败。
 #   - 版本安装：优先 `unix.sh <版本>` 钉死安装；若 CDN 拒绝版本化产物（2026-11-07 实测 403），
 #     回退安装 latest，并由下一步的版本断言**强制**校验——断言不过即失败，锁不会静默漂移。
@@ -96,7 +101,16 @@ jobs:
           fi
           exit $fail
 
-      # ---- 五道门禁：顺序执行，任一非 0 即失败 ----
+      # ---- 冷启动引导 + 五道门禁：顺序执行，任一非 0 即失败 ----
+      - name: "Bootstrap moon registry index (cold checkout)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 全新 runner 无 ~/.moon/registry 索引；`moon check` 不会自动引导，
+          # 会报 "module was not found in the registry"。一次 `moon update`
+          # 克隆 git 索引与 symbols；依赖版本仍由 moon.mod 钉死值解析（见文件头依赖策略）。
+          moon update
+
       - name: "Gate 1/5 · moon check --deny-warn"
         shell: bash
         run: moon check --deny-warn
