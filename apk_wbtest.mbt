@@ -116,3 +116,49 @@ test "extra_field_has_id scans id-value pairs" {
   }
   assert_true(extra_field_has_id(Bytes::from_array(b[:])[:], 0x0001))
 }
+
+///|
+/// 字节 → 小写十六进制（白盒测试辅助）。
+fn w_hex(b : Bytes) -> String {
+  let digits = "0123456789abcdef"
+  let mut s = ""
+  for x in b {
+    let v = x.to_int()
+    let hi = (v >> 4) & 15
+    let lo = v & 15
+    s = s + digits[hi:hi + 1].to_owned()
+    s = s + digits[lo:lo + 1].to_owned()
+  }
+  s
+}
+
+///|
+/// SHA-256 已知向量（FIPS 180-4 / NIST 标准测试向量），白盒校验纯 MoonBit 实现。
+test "sha256 known vectors" {
+  assert_eq(
+    w_hex(sha256(b"")),
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  )
+  assert_eq(
+    w_hex(sha256(b"abc")),
+    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+  )
+  assert_eq(
+    w_hex(sha256(b"123456789")),
+    "15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225",
+  )
+  // 56 字节输入触发「0x80 + 8 字节位长」跨块边界。
+  assert_eq(
+    w_hex(sha256(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")),
+    "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+  )
+}
+
+///|
+/// SHA-256 输出长度与确定性。
+test "sha256 length and determinism" {
+  let a = sha256(b"apk")
+  assert_eq(a.length(), 32)
+  assert_true(a == sha256(b"apk"))
+  assert_true(a != sha256(b"apk!"))
+}

@@ -67,7 +67,13 @@ pub(all) struct ManifestRef {
 ///|
 /// 签名块摘要。`certificates` 保存 DER 原始字节，不做证书链校验。
 /// v2/v3/v3.1 的证书从签名块 signer 结构中按长度前缀定位提取；
-/// v1（JAR 签名）证书封装于 PKCS#7，不在当前范围，`certificates` 为空、`block_id` 为 0。
+/// v1（JAR 签名）的证书从 `META-INF/*.RSA|*.DSA|*.EC` 的 PKCS#7 封装中提取。
+///
+/// `verified` 语义（**重要**）：为 `true` 当且仅当「签名结构解析通过 **且** 本地可验证的
+/// 摘要全部一致」——v1 为 MANIFEST 条目摘要 + `.SF` 对 MANIFEST 的摘要；v2/v3/v3.1 为
+/// APK 内容分块摘要（SHA-256）。它**不表示签名有效**：本库没有 RSA/ECDSA 公钥验签能力，
+/// 不校验证书链，也不做签名值验证。需要逐项判定时用 `Apk::signature_checks()`，
+/// 其中 `signature_verified` 恒为 `false`。
 pub(all) struct SignatureInfo {
   scheme : SignatureScheme
   block_id : UInt32
@@ -348,88 +354,29 @@ pub fn Apk::native_libs(
 }
 
 ///|
-/// 返回已识别的签名方案摘要；未做密码学校验，`verified` 恒为 `false`。
+/// 返回已识别的签名方案摘要。
 ///
-/// - v1：`META-INF/*.RSA|*.DSA|*.EC` 存在即识别（证书在 PKCS#7 内，`certificates` 为空，
-///   `block_id` 为 0）。
+/// - v1：`META-INF/*.RSA|*.DSA|*.EC` 存在即识别；证书从 PKCS#7 提取（解析失败时为空），
+///   `block_id` 为 0。`verified` 需 MANIFEST 条目摘要与 `.SF` 清单摘要全部一致。
 /// - v2/v3/v3.1：解析 APK Signing Block 的 ID-value 对（0x7109871a / 0xf05368c0 /
-///   0x1b93ad61），并从 signer 结构按长度前缀提取 DER 证书原始字节。
+///   0x1b93ad61），从 signer 结构按长度前缀提取 DER 证书与摘要记录；`verified` 需
+///   APK 内容分块摘要（SHA-256）与签名块中的摘要一致。
 /// - 未知 ID-value 对（如 verity padding）跳过；块内没有任何受支持方案时报
 ///   `UnsupportedSignatureScheme`；块结构异常报 `BadSigningBlock`。
+///
+/// **边界**：`verified` = 结构 + 摘要校验通过，**≠ 签名有效**（无 RSA/ECDSA 验签）。
+/// 逐项结论见 `Apk::signature_checks()`。
 pub fn Apk::signatures(self : Apk) -> Array[SignatureInfo] raise ApkError {
   let out : Array[SignatureInfo] = []
-  let mut has_v1 = false
-  for e in self.entries {
-    if e.name.has_prefix("META-INF/") &&
-      (
-        e.name.has_suffix(".RSA") ||
-        e.name.has_suffix(".DSA") ||
-        e.name.has_suffix(".EC")
-      ) {
-      has_v1 = true
-    }
-  }
-  if has_v1 {
+  for rec in self.collect_signature_records() {
+    let check = self.verify_signature_record(rec)
     out.push({
-      scheme: SignatureScheme::V1,
-      block_id: 0,
-      certificates: [],
-      verified: false,
+      scheme: rec.scheme,
+      block_id: rec.block_id,
+      certificates: rec.certs,
+      verified: check.structure_ok && check.digest_ok,
     })
   }
-  match self.signing_block_off {
-    None => ()
-    Some(sb) => {
-      let block_start = sb.to_int()
-      let size = le_u64(self.source, block_start)
-      let pairs_start = block_start + 8
-      let pairs_end = block_start + size.to_int() - 16
-      let mut pos = pairs_start
-      let mut recognized = 0
-      while pos < pairs_end {
-        guard pos + 8 <= pairs_end else {
-          raise ApkError::BadSigningBlock(
-            pos, "truncated ID-value pair length in APK Signing Block",
-          )
-        }
-        let pair_len = le_u64(self.source, pos)
-        guard pair_len >= 4 && pair_len - 4 <= (pairs_end - pos - 8).to_uint64() else {
-          raise ApkError::BadSigningBlock(
-            pos, "ID-value pair overruns APK Signing Block",
-          )
-        }
-        let id = le_u32(self.source, pos + 8)
-        let value_off = pos + 12
-        let value_len = pair_len.to_int() - 4
-        if id == SIG_ID_V2 || id == SIG_ID_V3 || id == SIG_ID_V31 {
-          let sch = if id == SIG_ID_V2 {
-            SignatureScheme::V2
-          } else if id == SIG_ID_V3 {
-            SignatureScheme::V3
-          } else {
-            SignatureScheme::V31
-          }
-          let certs = extract_certs(self.source, sch, value_off, value_len, pos)
-          out.push({
-            scheme: sch,
-            block_id: id,
-            certificates: certs,
-            verified: false,
-          })
-          recognized = recognized + 1
-        }
-        pos = pos + 8 + pair_len.to_int()
-      }
-      if recognized == 0 {
-        raise ApkError::UnsupportedSignatureScheme(
-          "APK Signing Block at offset " +
-          block_start.to_string() +
-          " contains no v2/v3/v3.1 signature scheme",
-        )
-      }
-    }
-  }
-  out.sort_by(fn(a, b) { scheme_rank(a.scheme) - scheme_rank(b.scheme) })
   out
 }
 
@@ -711,25 +658,27 @@ fn scheme_rank(s : SignatureScheme) -> Int32 {
 }
 
 ///|
-/// 从签名方案值（signer 序列）中提取 DER 证书原始字节。
+/// 从签名方案值（signer 序列）中提取 DER 证书与摘要记录。
 ///
 /// 布局（APK Signature Scheme v2/v3/v3.1）：
 /// value = u32 序列长 { u32 signer 长 signer }*；
 /// signer = signed_data(长度前缀) + signatures(长度前缀序列) + public_key(长度前缀)；
 /// signed_data = digests(长度前缀序列) + certificates(长度前缀序列)
 ///          + [v3/v3.1: minSDK(u32) + maxSDK(u32)] + additional_attributes。
+/// digests = u32 序列长 { u32 记录长 u32 算法ID u32 摘要长 摘要 }*。
 /// 即 v2/v3/v3.1 的 signer 顶层布局一致（sd_prefix = 0）；v3/v3.1 的
 /// min/max SDK（v3.1 另有 rotationMinSDK，位于 additional_attributes）在
 /// signed_data 内部、certificates 之后，不在 signer 顶层。
 /// 结构不合法一律 `BadSigningBlock`（不做任何静默降级）。
-fn extract_certs(
+fn extract_signer_data(
   source : Bytes,
   sch : SignatureScheme,
   value_off : Int32,
   value_len : Int32,
   pair_off : Int32,
-) -> Array[Bytes] raise ApkError {
+) -> SignerData raise ApkError {
   let certs : Array[Bytes] = []
+  let digests : Array[SignerDigest] = []
   let end = value_off + value_len
   let mut pos = value_off
   guard pos + 4 <= end else {
@@ -781,7 +730,35 @@ fn extract_certs(
     guard digests_len <= (sd_end - sp - 4).reinterpret_as_uint() else {
       raise ApkError::BadSigningBlock(pair_off, "digests overrun signed data")
     }
-    sp = sp + 4 + digests_len.reinterpret_as_int()
+    let digests_end = sp + 4 + digests_len.reinterpret_as_int()
+    sp = sp + 4
+    while sp < digests_end {
+      guard sp + 4 <= digests_end else {
+        raise ApkError::BadSigningBlock(
+          pair_off, "digest record length missing",
+        )
+      }
+      let rec_len = le_u32(source, sp)
+      guard rec_len >= 8 &&
+        rec_len <= (digests_end - sp - 4).reinterpret_as_uint() else {
+        raise ApkError::BadSigningBlock(
+          pair_off, "digest record overruns digests",
+        )
+      }
+      let rec_end = sp + 4 + rec_len.reinterpret_as_int()
+      let algorithm = le_u32(source, sp + 4)
+      let digest_len = le_u32(source, sp + 8)
+      guard digest_len <= rec_len - 8 else {
+        raise ApkError::BadSigningBlock(
+          pair_off, "digest overruns digest record",
+        )
+      }
+      digests.push({
+        algorithm,
+        digest: source[sp + 12:sp + 12 + digest_len.reinterpret_as_int()].to_owned(),
+      })
+      sp = rec_end
+    }
     guard sp + 4 <= sd_end else {
       raise ApkError::BadSigningBlock(
         pair_off, "certificates length missing in signed data",
@@ -812,7 +789,7 @@ fn extract_certs(
     }
     pos = signer_end
   }
-  certs
+  { certs, digests, }
 }
 
 ///|

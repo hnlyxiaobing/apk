@@ -42,6 +42,7 @@ pub fn Apk::manifest(Self) -> ManifestRef raise ApkError
 pub fn Apk::native_libs(Self, Abi?) -> Array[NativeLib] raise ApkError
 pub fn Apk::open(Bytes) -> Self raise ApkError
 pub fn Apk::resource_table(Self) -> ResourceTableRef? raise ApkError
+pub fn Apk::signature_checks(Self) -> Array[SignatureCheck] raise ApkError
 pub fn Apk::signatures(Self) -> Array[SignatureInfo] raise ApkError
 pub impl ContainerIndex for Apk
 
@@ -65,6 +66,17 @@ pub(all) struct ResourceTableRef {
   entry_name : String
   raw : Bytes
   global_string_pool : Bytes
+}
+
+pub(all) struct SignatureCheck {
+  scheme : SignatureScheme
+  structure_ok : Bool
+  digest_ok : Bool
+  digest_algorithm : String
+  entries_checked : Int32
+  entries_failed : Int32
+  signature_verified : Bool
+  detail : String
 }
 
 pub(all) struct SignatureInfo {

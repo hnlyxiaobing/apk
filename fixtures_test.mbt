@@ -336,7 +336,99 @@ test "golden apk sig fx-multidex-v2v3" {
 }
 
 ///|
-/// 多 dex 结构冒烟：一个 APK 内两个 DEX 条目（classes.dex + classes2.dex）。
+/// 真实签名样本的**摘要**校验：tvshell-debug（v1+v2+v3，apksigner 实测 `Verifies`）。
+/// 断言 `structure_ok && digest_ok`，同时 `signature_verified` 必须恒为 false
+///（本库不做 RSA/ECDSA 验签，边界见 API.md / DECISIONS.md §5）。
+test "signature digest checks real v1+v2+v3 tvshell-debug" {
+  let a = @apk.Apk::open(fixture_tvshell_apk())
+  let checks = a.signature_checks()
+  assert_eq(checks.length(), 3)
+  for c in checks {
+    assert_true(c.structure_ok, msg="structure ok")
+    assert_true(c.digest_ok, msg="digest ok: \{c.detail}")
+    assert_true(!c.signature_verified, msg="signature must remain unverified")
+    assert_eq(c.digest_algorithm, "SHA-256")
+  }
+  let sigs = a.signatures()
+  assert_eq(sigs.length(), 3)
+  for s in sigs {
+    assert_true(s.verified, msg="SignatureInfo.verified = structure+digest")
+  }
+  // v1 证书从 PKCS#7 提取（DER SEQUENCE 起点 0x30）。
+  let mut v1_count = 0
+  for s in sigs {
+    if s.scheme is @apk.SignatureScheme::V1 {
+      v1_count = v1_count + 1
+      assert_eq(s.certificates.length(), 1)
+      assert_eq(s.certificates[0][0].to_int(), 0x30)
+    }
+  }
+  assert_eq(v1_count, 1)
+}
+
+///|
+/// v1-only 受控样本：MANIFEST 条目摘要 + `.SF` 清单摘要均为真实 apksigner 产物。
+test "signature digest checks real v1-only fx-multidex-v1" {
+  let a = @apk.Apk::open(fixture_fx_multidex_v1_apk())
+  let checks = a.signature_checks()
+  assert_eq(checks.length(), 1)
+  assert_eq(scheme_str(checks[0].scheme), "V1")
+  assert_true(checks[0].structure_ok)
+  assert_true(checks[0].digest_ok, msg=checks[0].detail)
+  assert_eq(checks[0].entries_checked, 4)
+  assert_eq(checks[0].entries_failed, 0)
+  assert_true(!checks[0].signature_verified)
+  assert_true(a.signatures()[0].verified)
+  assert_eq(a.signatures()[0].certificates.length(), 1)
+}
+
+///|
+/// v2/v3 受控样本：APK 内容分块摘要（SHA-256）与签名块记录一致。
+test "signature digest checks real v2+v3 fx-multidex-v2v3" {
+  let a = @apk.Apk::open(fixture_fx_multidex_v2v3_apk())
+  let checks = a.signature_checks()
+  assert_eq(checks.length(), 2)
+  for c in checks {
+    assert_true(c.structure_ok)
+    assert_true(c.digest_ok, msg=c.detail)
+    assert_eq(c.digest_algorithm, "SHA-256")
+    assert_eq(c.entries_checked, 0)
+    assert_true(!c.signature_verified)
+  }
+  for s in a.signatures() {
+    assert_true(s.verified)
+    assert_eq(s.certificates.length(), 1)
+  }
+}
+
+///|
+/// 验证摘要不一致时会如实报告 false（而不是抛错或谎报 true）。
+/// 通过改写 v2/v3 样本签名块中的 digest 记录所在区域的字节无法稳定定位，
+/// 这里改为改写条目数据：内容摘要必然变化，v2/v3 摘要校验应失败。
+test "signature digest detects tampered content" {
+  let src = fixture_fx_multidex_v2v3_apk()
+  // 第一个 local header 的数据区（AndroidManifest.xml 压缩数据）翻转 1 字节。
+  let tampered = fx_xor(src, 60, b'\xff')
+  let a = @apk.Apk::open(tampered)
+  let checks = a.signature_checks()
+  for c in checks {
+    assert_true(c.structure_ok)
+    assert_true(!c.digest_ok, msg="tampered APK content digest must not match")
+  }
+}
+
+///|
+/// 篡改 JAR 清单摘要后 v1 校验失败：修改 MANIFEST.MF 的内嵌摘要字节会破坏
+/// zlib 流，直接改写 `.SF` 中的清单摘要需要解压/重压；因此用 `build_zip` 现场
+/// 构造（见 `signature_test.mbt` 的合成 v1 用例）。
+test "signature checks real samples have no false positives" {
+  let base = @apk.Apk::open(fixture_base_apk())
+  assert_eq(base.signature_checks().length(), 0)
+  let unsigned = @apk.Apk::open(fixture_fx_multidex_unsigned_apk())
+  assert_eq(unsigned.signature_checks().length(), 0)
+}
+
+///|
 test "smoke apk multi-dex fx-multidex-v2v3" {
   let a = @apk.Apk::open(fixture_fx_multidex_v2v3_apk())
   let dex = a.dex_files()
