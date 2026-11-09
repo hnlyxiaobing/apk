@@ -112,6 +112,8 @@ pub suberror ApkError {
   BadAlignment(String, Int32)
   /// `resources.arsc` 完整展开时的结构错误（offset = arsc 内绝对偏移）。
   BadResourceTable(Int32, String)
+  /// ELF 头结构错误（offset = ELF 字节内偏移）。
+  BadElf(Int32, String)
 }
 
 ///|
@@ -329,6 +331,9 @@ pub fn Apk::dex_files(self : Apk) -> Array[DexEntry] raise ApkError {
 
 ///|
 /// 返回指定 ABI 的 `lib/<abi>/*.so` 列表；`abi = None` 返回全部并各自标注 ABI。
+///
+/// ABI 归类**只依据 `lib/<abi>/` 目录名**（与 aapt2 `native-code` 口径一致），不解析
+/// ELF 内容；内容侧交叉校验用 `NativeLib::elf_abi()`。
 pub fn Apk::native_libs(
   self : Apk,
   abi : Abi?,
@@ -353,6 +358,51 @@ pub fn Apk::native_libs(
     }
   }
   out
+}
+
+///|
+/// 从 ELF 头读取内容侧 ABI（交叉校验用，不替代 `NativeLib.abi` 的目录归类）。
+///
+/// 只读 ELF 头：magic `\x7fELF`、EI_CLASS（1=32/2=64）、EI_DATA（必须 1=小端）、
+/// `e_machine`（18..19 小端）。返回：
+/// - `EM_ARM(40)` → `ArmeabiV7a`；`EM_AARCH64(183)` → `Arm64V8a`；
+/// - `EM_386(3)` → `X86`；`EM_X86_64(62)` → `X86_64`；
+/// - `EM_RISCV(243)` / `EM_MIPS(8)` / 其他 → `Unknown(...)`（保留机器类型）。
+///
+/// 非法 ELF（magic/class/data 异常、头截断）报 `BadElf(offset, detail)`，不 panic。
+/// 典型用途：发现「目录写 x86_64、内容其实是 arm64」的错标 APK。
+pub fn NativeLib::elf_abi(self : NativeLib) -> Abi raise ApkError {
+  let b = self.bytes
+  let len = b.length()
+  if len < 20 {
+    raise ApkError::BadElf(len, "ELF header truncated (< 20 bytes)")
+  }
+  if b[0].to_int() != 0x7F ||
+    b[1].to_int() != 0x45 ||
+    b[2].to_int() != 0x4C ||
+    b[3].to_int() != 0x46 {
+    raise ApkError::BadElf(0, "missing ELF magic")
+  }
+  let ei_class = b[4].to_int()
+  if ei_class != 1 && ei_class != 2 {
+    raise ApkError::BadElf(4, "unsupported ELF class")
+  }
+  let ei_data = b[5].to_int()
+  if ei_data != 1 {
+    raise ApkError::BadElf(
+      5, "unsupported ELF data encoding (only little-endian)",
+    )
+  }
+  let machine = b[18].to_int() | (b[19].to_int() << 8)
+  match machine {
+    40 => Abi::ArmeabiV7a
+    183 => Abi::Arm64V8a
+    3 => Abi::X86
+    62 => Abi::X86_64
+    243 => Abi::Unknown("riscv64")
+    8 => Abi::Unknown("mips")
+    _ => Abi::Unknown("elf-machine-" + machine.to_string())
+  }
 }
 
 ///|

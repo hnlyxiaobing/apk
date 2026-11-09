@@ -20,6 +20,7 @@ pub suberror ApkError {
   UnsupportedSignatureScheme(String)
   BadAlignment(String, Int32)
   BadResourceTable(Int32, String)
+  BadElf(Int32, String)
 }
 pub fn ApkError::to_repr(Self) -> @debug.Repr
 
@@ -64,6 +65,7 @@ pub(all) struct NativeLib {
   path : String
   bytes : Bytes
 }
+pub fn NativeLib::elf_abi(Self) -> Abi raise ApkError
 
 pub(all) struct ResBag {
   parent : UInt32

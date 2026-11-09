@@ -157,8 +157,8 @@ fn fx_join(lines : Array[String]) -> String {
 
 ///|
 /// 容器侧黄金规范化（期望值内嵌 golden_* 常量）：
-/// ENTR（中央目录条目）+ DEX（classes*.dex 列表）+ MANI/ARSC 字节长 + LIB（ABI）。
-/// ABI 来自 aapt2 badging 的 native-code；本样本无 .so，故无 LIB 行。
+/// ENTR（中央目录条目）+ DEX（classes*.dex 列表）+ LIB（ABI 交叉校验）+ MANI/ARSC 字节长。
+/// LIB 行格式：`LIB|目录ABI|ELF头ABI|路径|字节数`；无 .so 的样本不产生 LIB 行。
 fn fx_canon_apk(a : @apk.Apk) -> String raise @apk.ApkError {
   let out : Array[String] = []
   for e in a.entries() {
@@ -166,6 +166,11 @@ fn fx_canon_apk(a : @apk.Apk) -> String raise @apk.ApkError {
   }
   for d in a.dex_files() {
     out.push("DEX|\{d.name}")
+  }
+  for l in a.native_libs(None) {
+    out.push(
+      "LIB|\{abi_str(l.abi)}|\{abi_str(l.elf_abi())}|\{l.path}|\{l.bytes.length()}",
+    )
   }
   let m = a.manifest()
   out.push("MANI|\{m.raw.length()}")
