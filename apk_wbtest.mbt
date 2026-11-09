@@ -162,3 +162,57 @@ test "sha256 length and determinism" {
   assert_true(a == sha256(b"apk"))
   assert_true(a != sha256(b"apk!"))
 }
+
+///|
+/// 白盒错误路径：坏 arsc typeSpec / 截断 DER / 坏签名块 signer / 坏 ELF 头
+/// —— 全部报 `ApkError`（或 DER 解析返回 None），不 panic。
+test "whitebox error paths: arsc DER signing block ELF" {
+  // arsc：typeSpec id=0 → BadResourceTable(off+8)。
+  let spec : Array[Byte] = []
+  w_push_u16(spec, 0x0202)
+  w_push_u16(spec, 16)
+  w_push_u32(spec, 16)
+  spec.push(b'\x00')
+  spec.push(b'\x00')
+  w_push_u16(spec, 1)
+  w_push_u32(spec, 0)
+  let spec_b = Bytes::from_array(spec[:])
+  let mut arsc_hit = false
+  try ignore(arsc_parse_typespec(spec_b, 0, 16, 16)) catch {
+    ApkError::BadResourceTable(8, _) => arsc_hit = true
+    _ => ()
+  } noraise {
+    _ => ()
+  }
+  assert_true(arsc_hit, msg="bad typeSpec must raise BadResourceTable")
+  // DER：只有 tag 没有长度 → None；非 DER 的 PKCS#7 → 空证书。
+  assert_true(der_read(b"\x30", 0, 1) is None)
+  assert_eq(pkcs7_certificates(b"not-a-der-pkcs7").length(), 0)
+  // 签名块：signer 序列长度越界 → BadSigningBlock(0)。
+  let mut sb_hit = false
+  try
+    ignore(
+      extract_signer_data(b"\xff\xff\xff\xff", SignatureScheme::V2, 0, 4, 0),
+    )
+  catch {
+    ApkError::BadSigningBlock(0, _) => sb_hit = true
+    _ => ()
+  } noraise {
+    _ => ()
+  }
+  assert_true(sb_hit, msg="bad signing block must raise BadSigningBlock")
+  // ELF：bad magic → BadElf。
+  let lib : NativeLib = {
+    abi: Abi::X86,
+    path: "lib/x86/libbad.so",
+    bytes: b"not-elf",
+  }
+  let mut elf_hit = false
+  try ignore(lib.elf_abi()) catch {
+    ApkError::BadElf(_, _) => elf_hit = true
+    _ => ()
+  } noraise {
+    _ => ()
+  }
+  assert_true(elf_hit, msg="bad ELF must raise BadElf")
+}

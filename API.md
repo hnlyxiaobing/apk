@@ -77,7 +77,7 @@
 |---|---|
 | `moon check --deny-warn` | ✅ 0 error / 0 warning（无 `0068`） |
 | `moon build` | ✅ |
-| `moon test` | ✅ 79 / 79（含真实/受控样本冒烟、黄金差分、合成 v1 签名、合成 arsc、合成 ELF、畸形派生；另有 5 个 `#skip` 用例不计入） |
+| `moon test` | ✅ 80 / 80（含真实/受控样本冒烟、黄金差分、合成 v1 签名、合成 arsc、合成 ELF、畸形派生；另有 5 个 `#skip` 用例不计入） |
 | `moon fmt --check` | ✅ |
 | 快照门禁（`moon info` + `git diff --exit-code`） | ✅ |
 

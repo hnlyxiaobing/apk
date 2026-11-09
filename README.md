@@ -3,7 +3,7 @@
 **APK 容器层解析库 —— ZIP 目录索引、签名结构与摘要校验、manifest 引用、dex 列表、native 库 ABI 归类与 resources.arsc 完整展开。**
 
 > 状态：**已实现并门禁全绿**（2026-11-09 R4 复核）。`moon check --deny-warn` 0 error / 0 warning；
-> `moon test` **79/79**（含真实样本、合成 v1 签名 / arsc / ELF 与畸形派生用例；另有 5 个 `#skip` 用例
+> `moon test` **80/80**（含真实样本、合成 v1 签名 / arsc / ELF 与畸形派生用例；另有 5 个 `#skip` 用例
 > 显式跳过、不计通过）。
 
 ## 定位与为什么存在
@@ -57,7 +57,7 @@
 | ZIP 索引 / 签名结构与摘要 / arsc 完整展开 / ELF ABI 交叉校验 / 惰性解压 | ✅ 真实实现（无 `declare`） |
 | `ContainerIndex for Apk`（API 冻结前加法性追认） | ✅ 见 `API.md` |
 | L1 真实样本 + L2 黄金 + 差分复核 | ✅ |
-| `moon check --deny-warn` / `moon build` / `moon test` / `moon fmt --check` / 快照 | ✅ 全绿（79/79） |
+| `moon check --deny-warn` / `moon build` / `moon test` / `moon fmt --check` / 快照 | ✅ 全绿（80/80） |
 
 ## 开发排序说明
 
