@@ -1,9 +1,10 @@
 ///|
 /// APK 容器层解析库：ZIP 中央目录索引 + Android 专有结构定位。
 ///
-/// 契约决策（见 DECISIONS.md §1）：本库是「ZIP 目录 + 索引」，只产出原始字节与位置信息，
-/// 不编排 `axml` / `dex` 的解析结果。这样 `apk` 对下游格式零知识，逆向入参可任意组合。
-/// 不解析 AXML / DEX 语义、不做签名校验、不打包、不修改 ZIP。
+/// 契约决策（见 DECISIONS.md §1）：本库是「ZIP 目录 + 索引」，只产出原始字节、位置信息与
+/// apk 自有值类型，不编排 `axml` / `dex` 的解析结果。这样 `apk` 对下游格式零知识，逆向入参可任意组合。
+/// 不解析 AXML / DEX 语义、不写签名、不打包、不修改 ZIP。签名只做**结构 + 摘要**校验
+/// （不做 RSA/ECDSA 公钥验签；`verified` 语义见 `SignatureInfo` 与 DECISIONS.md §5）。
 ///
 /// ZIP 读取实现：EOCD / 中央目录 / local header 由本包解析（所有错误携带目录偏移或条目名），
 /// DEFLATE 解压复用文档授权依赖 `bobzhang/zip/deflate`（Apache-2.0，审计见 DECISIONS.md §3）。
@@ -82,8 +83,9 @@ pub(all) struct SignatureInfo {
 }
 
 ///|
-/// `resources.arsc` 引用：第一阶段只读全局字符串池，不展开包/类型/配置项。
+/// `resources.arsc` 轻量索引：只读全局字符串池，不展开包/类型/配置项。
 /// `global_string_pool` 为 arsc 中全局字符串池 chunk 的完整原始字节（含 chunk 头）。
+/// 完整展开用 `Apk::resource_table_full()`（返回 apk 自有的 `ResTable` 值类型）。
 pub(all) struct ResourceTableRef {
   entry_name : String
   raw : Bytes

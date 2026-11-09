@@ -5,7 +5,9 @@
 > **不指向本仓库之外的任何文件**。
 >
 > 条目：§1 容器层只产出字节与索引（ADR-0003）｜§2 11 模块零跨模块 import 与组合根（ADR-0002）｜
-> §3 依赖引入五门槛与 `bobzhang/zip@0.1.2` 审计（ADR-0010）｜§4 开发排序（ADR-0005）。
+> §3 依赖引入五门槛与 `bobzhang/zip@0.1.2` 审计（ADR-0010）｜§4 开发排序（ADR-0005）｜
+> §5 签名 `verified` 语义：结构 + 摘要 ≠ 签名有效｜§6 resources.arsc 完整展开留在 apk｜
+> §7 原生库 ABI：目录归类 + ELF 头内容侧交叉校验。
 
 ---
 
@@ -35,17 +37,20 @@ manifest / DEX 解析器并返回解析结果。按字面实现会产生四个�
 | `Apk::open(Bytes)` | `Apk` | 纯值索引 |
 | `Apk::manifest()` | `ManifestRef { entry_name, raw: Bytes }` | 只给原始 AXML 字节 |
 | `Apk::dex_files()` | `Array[DexEntry { name, bytes }]` | 只给原始 DEX 字节 |
-| `Apk::native_libs(Abi?)` | `Array[NativeLib { abi, path, bytes }]` | 只按 ABI 归类 |
-| `Apk::resource_table()` | `ResourceTableRef?` | 第一阶段仅全局字符串池 |
-| `Apk::signatures()` | `Array[SignatureInfo]` | 只读识别，`verified=false` |
+| `Apk::native_libs(Abi?)` | `Array[NativeLib { abi, path, bytes }]` | 按 `lib/<abi>/` 目录归类；`NativeLib::elf_abi()` 做 ELF 头交叉校验 |
+| `Apk::resource_table()` | `ResourceTableRef?` | 轻量索引：全局字符串池 chunk |
+| `Apk::resource_table_full()` | `ResTable?` | 完整展开（package/typeSpec/type/bag），详见 §6 |
+| `Apk::signatures()` | `Array[SignatureInfo]` | 结构 + 摘要校验；`verified` 语义见 §5（**≠ 签名有效**） |
+| `Apk::signature_checks()` | `Array[SignatureCheck]` | 逐项结构与摘要结论；`signature_verified` 恒 false |
 | `Apk::entry(EntryName)` | `Bytes` | 惰性解压 |
 
 组合根（见 §2）决定「先解析 manifest 还是先扫描 dex」，并把 `raw` / `bytes` 交给
 `axml` / `dex` 解析器。`apk` 不 import、不调用、不返回任何下游类型。
 
-补记（2026-11-07）：`resources.arsc` 的**完整解析器**归入 `axml`（与二进制 XML 共享字符串池与
-ResChunk 头结构），`apk::resource_table()` 维持只产出原始字节/索引，与 `manifest()` 的分工完全同构——
-本条决策（容器层不编排下游解析、不返回下游类型）不变。
+补记（2026-11-07）：`resources.arsc` 的**完整解析器**曾计划归入 `axml`（与二进制 XML 共享字符串池与
+ResChunk 头结构），`apk::resource_table()` 只产出原始字节/索引。本轮范围调整后，按「不得 import `axml`、
+在 `apk` 内提供完整展开」的要求，`apk` 自建了字节级资源表解析（自有 `ResTable` 值类型，不返回下游类型）；
+本条「容器层不编排下游解析、不返回下游类型」的结论**不变**。取舍与重复实现风险见 §6。
 
 ### 理由
 
@@ -63,8 +68,8 @@ AXML 格式（逆向工具链的合理知识）。
 ② `apk` 提供 `manifest_doc()` 之类便利方法（会重新引入下游类型，否决；便利封装留给组合根）。
 
 **风险与缓解**：`ManifestRef.raw` 是 `Bytes` 而非结构化结果，若上层忘记解析会拿到二进制字节——
-`API.md` 写明调用顺序，组合根测试覆盖；签名块只识别不校验，`SignatureInfo.verified` 恒为
-`false` 并在文档注释中明确，避免被误当作「已验签」。
+`API.md` 写明调用顺序，组合根测试覆盖；签名验证只做结构 + 摘要，`SignatureInfo.verified` 的语义
+按 §5 严格限定为「结构合法且摘要一致」，不代表签名有效。
 
 ---
 
@@ -183,3 +188,115 @@ import（引入版本耦合，暂不做）。
 
 各模块并行推进、互不阻塞；对组合根契约冻结的要求提高——并行实现前需先冻结 API，
 否则并行项会互相等待（本库以 `pkg.generated.mbti` API 快照 + `API.md` 对账落实）。
+
+---
+
+## 5. 签名 `verified` 语义：结构 + 摘要校验通过 **≠** 签名有效
+
+### 背景
+
+早期实现只做「签名块定位 + 方案识别」，`SignatureInfo.verified` 恒为 `false`。这避免了误报，
+但没有利用本地可验证的信息：APK 签名方案本身包含**内容摘要**（v2/v3）与 JAR 清单摘要（v1），
+这些摘要不依赖私钥即可重算比对。另一方面，MoonBit 没有密码学 stdlib，本库也没有实现
+RSA/ECDSA/DSA 公钥运算，无法完成真正的验签。
+
+### 决策
+
+`SignatureInfo.verified` 的语义被严格定义为：
+
+> **`verified == true` ⟺ 签名结构解析通过 **且** 本地可验证的摘要全部一致。**
+> 它**不代表签名有效**：本库不做 RSA/ECDSA/DSA 公钥验签、不做证书链校验、不校验证书信任。
+
+同时新增 `Apk::signature_checks() -> Array[SignatureCheck]` 暴露逐项结论：
+`structure_ok` / `digest_ok` / `digest_algorithm` / `entries_checked` / `entries_failed`，
+以及**恒为 `false`** 的 `signature_verified`（机器可读的边界标记）。
+
+本地实际执行的校验：
+
+- **v1（JAR）**：解析 `META-INF/MANIFEST.MF`（section / 续行 / CRLF）、逐条目重算
+  `SHA-256-Digest` 并与清单比对；解析 `META-INF/*.SF` 的 `SHA-256-Digest-Manifest`
+  并与整份 MANIFEST.MF 比对；解析 `META-INF/*.RSA|DSA|EC` 的 PKCS#7 DER 外层结构并提取证书。
+- **v2/v3/v3.1**：解析 signer 的 `digests` 序列（算法 ID + 摘要），按 AOSP 规范重算 APK
+  内容分块摘要：section1 = 条目区、section2 = 中央目录、section3 = 改写 CD 偏移后的 EOCD；
+  每 1 MiB 分片摘要 = `SHA-256(0xa5 || chunk_len_u32le || chunk)`，
+  内容摘要 = `SHA-256(0x5a || chunk_count_u32le || concat(chunk_digests))`；与签名块中
+  SHA-256 摘要比对。
+- **SHA-256**：纯 MoonBit 实现（FIPS 180-4，NIST 向量白盒测试）。
+
+### 边界（**必须如实对外表述**）
+
+- **不做** RSA/ECDSA/DSA 验签；`verified == true` 不能表述为「签名有效 / 已验签」。
+- **不做**证书链、信任锚、吊销、时间戳校验；`certificates` 只是 DER 原始字节。
+- SHA-512 / verity / 其他内容摘要算法：算法字段可解析，但**未实现摘要**，`digest_ok=false`
+  并在 `detail` 说明（`[仍需实测]` 真实 SHA-512 样本）。
+- v1 摘要算法只实现 SHA-256；`SHA-1-Digest` / `SHA-512-Digest` 清单条目会标记为不支持。
+- 摘要通过只证明「文件内容与签名块/清单中记录的摘要一致」；攻击者若能同时改写内容与摘要
+  （例如重新签名），摘要仍会一致——这正是必须公钥验签的原因。
+
+### 证据
+
+- 真实受控样本 `tvshell-debug.apk`（v1+v2+v3）与 `fx-multidex-v2v3.apk`：`structure_ok` 与
+  `digest_ok` 全为 true；`fx-multidex-v1.apk` 的 4 个清单条目摘要 + MANIFEST 摘要全通过。
+  工具侧独立基准：`apksigner verify --verbose` 对同一样本输出 `Verifies`（开发期复核）。
+- 合成 v1 样本（测试内 DER/MANIFEST 构造）覆盖：摘要不一致、MANIFEST 摘要错误、PKCS#7 结构
+  非法、缺 `.SF` 四条失败路径，均如实返回 false 而非抛错/panic。
+- **未做**：真实 SHA-512 签名样本、真实 v3.1 / 多签名者、证书链验证 → `[仍需实测]`。
+
+---
+
+## 6. resources.arsc 完整展开留在 `apk`（本轮范围取舍）
+
+### 背景
+
+`resources.arsc` 与二进制 XML 共享字符串池 / ResChunk 头，曾计划把完整解析器放在 `axml`，
+`apk::resource_table()` 只给原始字节与全局字符串池。本轮任务要求在 `apk` 内完整展开
+（package / typeSpec / type 条目 / 复杂 bag），且明确**不得 import `axml`**（ADR-0002 零跨模块 import）。
+
+### 决策
+
+- 在 `apk` 内新增**自有字节解析器**（`arsc.mbt`）与**自有值类型**（`ResTable` / `ResPackage` /
+  `ResTypeSpec` / `ResTypeConfig` / `ResEntry` / `ResBag` / `ResValue` / `ResConfig`），
+  不 import、不调用、不返回 `axml` 的任何类型。
+- 新增 `Apk::resource_table_full()` 与 `parse_resources_arsc(Bytes)`；保留 `resource_table()`
+  的轻量路径（只切全局字符串池）以维持既有 API 与性能特征。
+- 语义对齐 AOSP `ResourceTypes.h` / `LoadedArsc.cpp` 与 `axml` 的资源表实现：dense / OFFSET16 /
+  SPARSE 三种 entry offset、compact entry、complex bag、config qualifier、未知 chunk 跳过。
+
+### 理由
+
+- 满足本轮「apk 内完整展开 + 零 import」的硬约束；消费方仍可只依赖 `apk` 获得完整资源索引。
+- 与 §1 的「不返回下游类型」不冲突：`ResTable` 是 `apk` 自己的值类型，不是 `axml::ResTable`。
+
+### 后果与风险
+
+- **重复实现**：`apk` 与 `axml` 各有一套 arsc 解析代码，存在语义漂移风险。缓解：
+  两侧都以 AOSP 结构为准；`apk` 侧用 `aapt2 dump resources` 作为工具侧独立基准做真实样本差分
+  （`fx-multidex` 的 bool/color/string 三类型与 zh 配置逐值一致）。
+- `apk` 侧不提供 aapt2 风格的值渲染、主题求值、bag 压平、动态包改写；这些仍属 `axml` 能力。
+- 该取舍与既有「arsc 完整解析器归 axml」的排期判断不同，**已登记给主控裁决**（是否长期保留
+  两份实现、或由组合根在两者间选择）。
+
+---
+
+## 7. 原生库 ABI：目录归类为权威，ELF 头做内容侧交叉校验
+
+### 背景
+
+`native_libs()` 的 ABI 一直来自 `lib/<abi>/` 目录名（与 aapt2 `native-code` 口径一致），
+但既有内嵌样本均无 `.so`，非空路径缺乏测试证据；真实第三方 `.so` 因许可不明不能入库。
+
+### 决策
+
+1. `NativeLib.abi` **继续以目录名为权威**（容器层不解析 ELF 语义，保持 `native_libs` 轻量）。
+2. 新增 `NativeLib::elf_abi() -> Abi raise ApkError`：只读 ELF 头（magic / EI_CLASS / EI_DATA /
+   `e_machine`），给出内容侧 ABI；非法 ELF 报 `BadElf(offset, detail)`。
+3. 两者不一致（如目录写 `x86_64`、ELF 头是 AArch64）**不改写 `NativeLib.abi`**，由调用方通过
+   两个值发现错标；这是审计场景需要的事实，而不是静默纠错。
+4. 测试用**测试内构造的最小 ELF fixture**（不引入第三方二进制）覆盖 arm64-v8a / armeabi-v7a /
+   x86 / x86_64 / riscv64 与坏 ELF 错误路径；真实第三方 `.so` 差分仍 `[仍需实测]`。
+
+### 后果
+
+- 非空 `.so` 的路径解析、ABI 归类、字节完整性、过滤、ELF 头一致性均有回归。
+- 真实 `.so`（含压缩/加密/多架构混合）的行为仍未验证；目录名与 ELF 头不一致的真实样本也未取得。
+

@@ -53,17 +53,23 @@ javac --release 11 → d8 --min-api 21（两个桶 → classes.dex / classes2.de
     独立实现为工具侧基准）；
   - `DEX|name`：`classes*.dex` 列表（按名排序，多 dex 全列）；
   - `MANI|len` / `ARSC|len`：`AndroidManifest.xml` / `resources.arsc` 解压后字节长；
-  - `LIB|abi`：原生库 ABI 归类（aapt2 `dump badging` 的 `native-code` 口径）；
-    本库样本均无 `.so`，故黄金中无 `LIB` 行。
+  - `LIB|目录ABI|ELF头ABI|path|bytes`：原生库 ABI 归类（目录 ABI = aapt2 `native-code`
+    口径；ELF 头 ABI = `NativeLib::elf_abi()` 内容侧交叉校验）。**真实样本均无 `.so`，故其黄金
+    无 `LIB` 行；非空 ABI 路径由测试内合成 ELF fixture 覆盖（`elf_test.mbt`）。**
 - **签名侧（sig）**：固定顺序 `SIG|V1|V2|V3|V31`，无任何签名方案时 `SIG|NONE`；工具侧基准为
   `apksigner verify --verbose`（min-sdk 21/24/28 三个仿真层并集）；解析侧为
-  `@apk.signatures()` 的方案存在性检测（`verified` 恒为 `false`，不做密码学校验）。
+  `@apk.signatures()` 的方案存在性检测 + **结构/摘要**校验（`verified` 语义见 `DECISIONS.md` §5；
+  **不做** RSA/ECDSA 验签，`signature_verified` 恒 false）。
 - **规范化原则**：只保留结构化字段，去掉行号、时间戳、绝对路径等易变文本。
 
 **开发期差分复核方法与结论**（开发期验证，黄金值已内嵌入库）：
 证据链为「来源资产（SHA-256）→ `tests/fixtures/` 提取样本（字节相等）→ 测试内嵌字节
 （SHA-256 相等）→ 解析输出 ↔ 工具侧规范化输出（逐字段差分）」。tvshell-debug 与 base
 两样本**工具侧 + 解析侧全通**；三受控变体（含多 dex 与三类签名方案）解析侧全通。
+R4 新增两条工具侧独立基准：`resources.arsc` 完整展开 ↔ `aapt2 dump resources`（fx-multidex
+的 bool/color/string 三类型与 zh 配置逐值一致）；签名结构 + 摘要 ↔ `apksigner verify`
+（tvshell v1+v2+v3、fx-multidex-v1、fx-multidex-v2v3）。**注意**：签名侧只核对摘要，
+不做公钥验签（见 `DECISIONS.md` §5）。
 
 ## 4. 未入库的第三方样本
 
@@ -75,8 +81,22 @@ phone-1.6.0.apk、tv-2.6.1.apk、partyr-1.6.0.apk 等第三方目标样本许可
 截断、EOCD 污染、中央目录偏移污染、条目 CRC 污染、未知压缩方法等用例，断言报 `ApkError`
 而非 panic。派生样本不落盘、不入库，由测试代码现场构造。
 
+R4 新增的**纯合成**样本（同样不落盘、不入库，测试代码内构造）：
+
+- `signature_test.mbt`：v1 JAR 签名（MANIFEST.MF / `.SF` / 最小 PKCS#7 DER），覆盖摘要一致、
+  条目摘要不一致、清单摘要错误、PKCS#7 结构非法、缺 `.SF`；
+- `arsc_test.mbt`：完整资源表（字符串池 / package / typeSpec / type / dense·OFFSET16·SPARSE
+  offsets / compact·complex bag / 多配置 / 未知 chunk 跳过）与坏 table/package/typeSpec/
+  entry offset/bag count 错误路径；
+- `elf_test.mbt`：最小 ELF32/ELF64 头（arm64-v8a / armeabi-v7a / x86 / x86_64 / riscv64）
+  与坏 ELF 头（magic/class/data/截断）。
+
 ## 6. 缺口登记
 
-- 内嵌样本均无 `.so` → `native_libs` 非空 ABI 的真实差分 `[仍需实测]`（`LIB|abi` 只有空集等价验证）。
+- **真实第三方 `.so`** 的解析侧 ABI 黄金差分 `[仍需实测]`：内嵌样本均无 `.so`；R4 用测试内
+  合成 ELF fixture 补齐了非空 `.so` 的路径解析 / 目录 ABI / ELF 头交叉校验 / 坏 ELF 错误路径，
+  但**不能替代**真实 `.so`（含压缩、多架构、错标）差分。
 - 未入库第三方样本的解析侧差分 `[仍需实测]`（见 §4，`fixtures_test.mbt` 中以 `#skip` 显式跳过，
   绝不冒充通过）。
+- 签名**公钥验签**与证书链：未实现；SHA-512 / verity 摘要、真实 v3.1 / 多签名者样本
+  `[仍需实测]`。
