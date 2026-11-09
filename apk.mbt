@@ -110,6 +110,8 @@ pub suberror ApkError {
   BadSigningBlock(Int32, String)
   UnsupportedSignatureScheme(String)
   BadAlignment(String, Int32)
+  /// `resources.arsc` 完整展开时的结构错误（offset = arsc 内绝对偏移）。
+  BadResourceTable(Int32, String)
 }
 
 ///|
@@ -381,7 +383,10 @@ pub fn Apk::signatures(self : Apk) -> Array[SignatureInfo] raise ApkError {
 }
 
 ///|
-/// 返回 `resources.arsc` 引用（第一阶段仅全局字符串池）；无该条目返回 `None`。
+/// 返回 `resources.arsc` 引用（仅全局字符串池）；无该条目返回 `None`。
+///
+/// 这是**轻量索引**路径（只切出全局字符串池 chunk，不展开包/类型）。完整展开用
+/// `Apk::resource_table_full()`。
 pub fn Apk::resource_table(self : Apk) -> ResourceTableRef? raise ApkError {
   for e in self.entries {
     if e.name == "resources.arsc" {
@@ -391,6 +396,21 @@ pub fn Apk::resource_table(self : Apk) -> ResourceTableRef? raise ApkError {
         raw,
         global_string_pool: arsc_global_string_pool(raw),
       })
+    }
+  }
+  None
+}
+
+///|
+/// 返回 `resources.arsc` 的**完整展开**结果（全局字符串池 + package/typeSpec/
+/// type 条目/复杂 bag）；无该条目返回 `None`。
+///
+/// 解析规则见 `arsc.mbt` 顶部文档；畸形结构报 `BadResourceTable` /
+/// `UnexpectedEof`（带 arsc 内绝对偏移），不 panic。
+pub fn Apk::resource_table_full(self : Apk) -> ResTable? raise ApkError {
+  for e in self.entries {
+    if e.name == "resources.arsc" {
+      return Some(parse_resources_arsc(extract_data(self.source, e)))
     }
   }
   None
