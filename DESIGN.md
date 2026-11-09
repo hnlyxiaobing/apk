@@ -1,10 +1,10 @@
 # apk · 设计契约（DESIGN.md）
 
-> Round-1 / 2026-11-06 ｜ R2 冻结前整改更新 2026-11-07 ｜ 状态：**已实现**（ZIP 索引 / 签名块只读识别 / 惰性解压均为真实实现），门禁全绿（42/42）
+> 2026-11-06 立约 ｜ 2026-11-07 更新 ｜ 状态：**已实现**（ZIP 索引 / 签名块只读识别 / 惰性解压均为真实实现），门禁全绿（53/53）
 
 ## 1. 分层位置与职责
 
-L1 逆向输入层的**容器/索引库**。职责：把 APK 字节流变成「ZIP 条目索引 + Android 专有结构定位 + 原始字节访问」。**不编排下游解析**（ADR-0003）。
+L1 逆向输入层的**容器/索引库**。职责：把 APK 字节流变成「ZIP 条目索引 + Android 专有结构定位 + 原始字节访问」。**不编排下游解析**（见 `DECISIONS.md` §1）。
 
 ## 2. 模块边界 / 依赖方向 / 数据流
 
@@ -51,7 +51,7 @@ APK Bytes ──► Apk::open ──► Apk(索引)
 ## 7. 平台约束与外部依赖
 
 - `preferred_target = "wasm"`（未改动），全后端。
-- 后续实现期依赖 `bobzhang/zip@0.1.2`（本轮未引入）；不依赖 `axml` / `dex`。
+- 实现期依赖 `bobzhang/zip@0.1.2`（仅 `deflate` 子包，见 `DECISIONS.md` §3）；不依赖 `axml` / `dex`。
 - 事实约束：`zipalign` 必须先于 `apksigner`（属打包链，不在本库）；targetSdk 30+ 强制 v2+；签名块位于 Central Directory 之前，magic `"APK Sig Block 42"`。
 
 ## 8. 输入输出类型与错误传播（纯 MoonBit 库）
@@ -74,32 +74,33 @@ APK Bytes ──► Apk::open ──► Apk(索引)
 | 层次 | 内容 |
 |---|---|---|
 | 黑盒（L0 程序化 fixture） | 签名块魔数、ZIP64 拒绝、4 字节对齐、stored/deflate 条目、畸形中央目录 | ✅ 33 例 |
-| 黑盒（L1/L2 真实样本，R2 WP-G 新增） | 内嵌真实 `tvshell-debug.apk`（21208 B）与 `base.apk`（1179 B）；`aapt2 dump badging` + .NET `ZipFile` 中央目录规范化黄金与 `@apk.Apk` 输出逐字段差分 | ✅ 两样本工具侧+解析侧全通（退出码 0） |
-| 畸形派生（R2 新增 `fixtures_malformed_test.mbt`） | 从真实 APK 派生：截断 / EOCD 签名污染 / 中央目录偏移污染 / 条目 CRC 污染 / 未知压缩方法；断言报 `ApkError` 而非 panic | ✅ 5 例 |
+| 黑盒（L1/L2 真实/受控样本） | 内嵌真实 `tvshell-debug.apk`（21208 B）与 `base.apk`（1179 B）及受控 `fx-multidex-*` 三变体；`aapt2 dump badging` + .NET `ZipFile` 中央目录规范化黄金（开发期差分复核，**期望值已内嵌 `fixtures_test.mbt`**）与 `@apk.Apk` 输出逐字段差分 | ✅ tvshell-debug、base 两样本工具侧+解析侧全通 |
+| 畸形派生（`fixtures_malformed_test.mbt`） | 从真实 APK 派生：截断 / EOCD 签名污染 / 中央目录偏移污染 / 条目 CRC 污染 / 未知压缩方法 / 多 dex 截断与目录污染；断言报 `ApkError` 而非 panic | ✅ 6 例 |
 | 白盒 | EOCD 定位、签名块魔数、ZIP64、4 字节对齐 | ✅ |
 | 门禁 | `moon fmt --check` / `moon check --deny-warn` / `moon build` / `moon test` | ✅ 全绿 |
 
 skip 机制：MoonBit 原生 `#skip` 属性（默认不计入 `Total tests`；`moon test --include-skipped` 才执行）。
 许可不明/体积过大的样本用 `#skip` 显式标注，**绝不冒充通过**。
 
-## 11. 验收标准（实现轮）
+## 11. 验收标准（实现阶段）
 
 1. 真实 APK 的条目清单 / dex 数 / manifest·arsc 字节长 / ABI 与独立实现（.NET `ZipFile`、aapt2 `native-code`）一致 —— ✅（tvshell-debug、base）；
-   manifest 语义字段（package/version/sdk/permissions/activity）按 ADR-0003 归 **axml 链**，其解析侧差分 ✅；
+   manifest 语义字段（package/version/sdk/permissions/activity）按模块边界（`DECISIONS.md` §1）归 **axml 解析器**，其解析侧差分 ✅；
 2. 畸形 APK 全部返回带偏移的 `ApkError` —— ✅（含真实样本派生的 5 例）；
 3. `--deny-warn` 转绿 —— ✅（原定 R4，已提前达成）。
 
 ## 12. 未解决问题 / 待验证假设
 
-- `bobzhang/zip@0.1.2` 的 ZIP64 / 容错行为未验证（实现轮前置）—— 五门槛审计已登记（ADR-0010 §2 / COMPATIBILITY.md，风险门槛为“登记不阻断”）。
+- `bobzhang/zip@0.1.2` 的 ZIP64 / 容错行为未完全验证 —— 五门槛审计已登记（见 `DECISIONS.md` §3，风险门槛为“登记不阻断”；aapt2 对齐填充类容器兼容性风险已实测登记并规避）。
 - `resources.arsc` 完整展开复杂度高，第一阶段只读全局字符串池。
-- 目标游戏 APK（phone/tv/partyr）许可不明未入库 → 其容器解析侧差分 `[仍需实测]`（`../docs/open-questions.md` §2.1）。
+- 目标游戏 APK（phone/tv/partyr）许可不明、未入库（开发期做过差分复核）→ 其容器解析侧差分 `[仍需实测]`。
 - 内嵌样本均无 `.so` → `native_libs` 非空 ABI 的真实差分 `[仍需实测]`。
 
 ## 13. 当前状态与 TODO
 
-`apk.mbt` 已实现全部类型与公开函数（**无 `declare`、无 `0068`**），公开 API 有 `///` 文档注释；字段 `method` 已改名 `compression_method`（避开保留字）。`pub impl ContainerIndex for Apk` 为**冻结前追认**（决策点 7 加法性变更，见 `API.md` 文首）。
+`apk.mbt` 已实现全部类型与公开函数（**无 `declare`、无 `0068`**），公开 API 有 `///` 文档注释；字段 `method` 已改名 `compression_method`（避开保留字）。`pub impl ContainerIndex for Apk` 为**冻结前追认**（API 冻结前的加法性变更，见 `API.md` 文首）。
 
 ## References
 
-`../docs/research-and-verification.md` §2.1/§2.4 · `../docs/adr/ADR-0002`、`ADR-0003`、`ADR-0005` · `https://source.android.com/docs/security/features/apksigning/v2`
+设计决策与依据见 `DECISIONS.md`；测试资产（来源 / 哈希 / 规范化口径）见 `tests/ASSETS.md`；
+APK Signing Block 规范：`https://source.android.com/docs/security/features/apksigning/v2`。

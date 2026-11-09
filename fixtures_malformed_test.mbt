@@ -1,6 +1,6 @@
-// WP-G / Q1 畸形派生用例（R2 准备轮新增文件）：从**真实** tvshell-debug.apk 派生，
+// 畸形派生用例：从**真实** tvshell-debug.apk 派生，
 // 覆盖截断 / 偏移污染（EOCD、中央目录）/ 错误 CRC / 未知压缩方法。
-// 断言目标：报 `ApkError` 而非 panic。样本来源见 fixtures/golden/ASSETS.md。
+// 断言目标：报 `ApkError` 而非 panic。样本来源见 tests/ASSETS.md。
 
 ///|
 /// 字节级变异：拷贝后把 `offset` 处改成 `value`。
@@ -214,17 +214,17 @@ test "apk malformed: 未知压缩方法报错" {
 }
 
 ///|
-/// ZIP 没有 AXML 那样的 chunk 概念；“未知 chunk 跳过”的等价用例见
-/// axml/fixtures_malformed_test.mbt；DEX 的“未知 opcode”见 dex 链。
+/// ZIP 没有 AXML 那样的 chunk 概念；“未知 chunk 跳过”的等价用例见 axml 库的对应畸形测试；
+/// DEX 的“未知 opcode”见 dex 库的对应测试。
 #skip
 test "apk malformed: 未知 chunk [SKIPPED: ZIP 无 chunk 概念]" {
   println("SKIPPED: ZIP 无 chunk；未知压缩方法用例见上")
 }
 
 ///|
-/// 受控构建多 dex APK（WP-4 2026-11-07，v2/v3 变体）派生：截断 / EOCD 签名污染 /
+/// 受控构建多 dex APK（v2/v3 变体）派生：截断 / EOCD 签名污染 /
 /// 中央目录偏移污染，同样只报 `ApkError` 而非 panic。样本性质：受控自产
-///（aapt2/d8/apksigner 构建），见 fixtures/golden/ASSETS.md。
+///（aapt2/d8/apksigner 构建），见 tests/ASSETS.md。
 test "apk malformed: 多 dex APK 截断与目录污染报错且不 panic" {
   let src = fixture_fx_multidex_v2v3_apk()
   for cut in [0, 100, 6000, 12549] {

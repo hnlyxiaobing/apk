@@ -1,12 +1,12 @@
 ///|
 /// APK 容器层解析库：ZIP 中央目录索引 + Android 专有结构定位。
 ///
-/// 契约决策（见 docs/adr/ADR-0003）：本库是「ZIP 目录 + 索引」，只产出原始字节与位置信息，
+/// 契约决策（见 DECISIONS.md §1）：本库是「ZIP 目录 + 索引」，只产出原始字节与位置信息，
 /// 不编排 `axml` / `dex` 的解析结果。这样 `apk` 对下游格式零知识，逆向入参可任意组合。
 /// 不解析 AXML / DEX 语义、不做签名校验、不打包、不修改 ZIP。
 ///
 /// ZIP 读取实现：EOCD / 中央目录 / local header 由本包解析（所有错误携带目录偏移或条目名），
-/// DEFLATE 解压复用文档授权依赖 `bobzhang/zip/deflate`（dependency-graph.md 明列）。
+/// DEFLATE 解压复用文档授权依赖 `bobzhang/zip/deflate`（Apache-2.0，审计见 DECISIONS.md §3）。
 /// ZIP64 一律拒绝（`Zip64Unsupported`），符合 `ApkError` 契约。
 
 ///|
@@ -67,7 +67,7 @@ pub(all) struct ManifestRef {
 ///|
 /// 签名块摘要。`certificates` 保存 DER 原始字节，不做证书链校验。
 /// v2/v3/v3.1 的证书从签名块 signer 结构中按长度前缀定位提取；
-/// v1（JAR 签名）证书封装于 PKCS#7，不在本轮范围，`certificates` 为空、`block_id` 为 0。
+/// v1（JAR 签名）证书封装于 PKCS#7，不在当前范围，`certificates` 为空、`block_id` 为 0。
 pub(all) struct SignatureInfo {
   scheme : SignatureScheme
   block_id : UInt32

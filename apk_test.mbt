@@ -2,9 +2,10 @@
 // Prefer high-level behaviors over implementation details.
 // Run `moon test` to execute and `moon test --update` to refresh snapshots.
 //
-// 测试策略（见 DESIGN.md §10）：工作区无真实 APK 资产（docs/open-questions.md Q1），
-// 所有 ZIP/APK 样本在测试代码中以编程方式构造：stored / deflate 条目、classes*.dex 列表、
+// 测试策略（见 DESIGN.md §10）：本文件为 L0 程序化 fixture 测试，所有 ZIP/APK 样本
+// 在测试代码中以编程方式构造：stored / deflate 条目、classes*.dex 列表、
 // lib/<abi>/*.so 目录、APK Signing Block 魔数用例、畸形中央目录用例、ZIP64 拒绝用例。
+// 真实/受控样本的内嵌差分测试见 fixtures_test.mbt（样本清单见 tests/ASSETS.md）。
 
 ///|
 /// 测试侧小端写入工具。

@@ -1,14 +1,14 @@
-// WP-G / Q1 真实样本证据链测试（R2 准备轮新增文件；不修改既有测试）。
+// 真实样本证据链测试。
 //
-// 证据链（由 fixtures/golden/golden-diff.ps1 机器校验）：
-//   真实 APK（SHA-256 见 fixtures/golden/ASSETS.md）
-//     -> tests/fixtures/*.apk（L1 提取，脚本比对字节相等）
-//     -> 本文件内嵌 APK 字节（脚本比对 SHA-256 == 来源资产）
+// 证据链（开发期由差分脚本机器校验；黄金期望值已内嵌本文件，`moon test` 即回归）：
+//   真实 APK（SHA-256 见 tests/ASSETS.md）
+//     -> tests/fixtures/*.apk（L1 提取，比对字节相等）
+//     -> 本文件内嵌 APK 字节（比对 SHA-256 == 来源资产）
 //     -> @apk.Apk 输出 <-> 条目清单（.NET System.IO.Compression 独立实现）+
 //        aapt2 dump badging 规范化黄金
 //
 // 边界说明：package / version / sdk / permissions / activity 等 manifest 语义字段
-//   **不在 apk 模块范围**（ADR-0003「apk 只做容器」），其解析侧差分由 axml 链承担；
+//   **不在 apk 模块范围**（`apk` 只做容器，见 DECISIONS.md §1），其解析侧差分由 axml 解析器承担；
 //   本链覆盖条目清单、DEX 列表、manifest/resources.arsc 字节与 ABI（native-code）。
 //
 // skip 机制：MoonBit 原生 `#skip` 属性（默认不计入 Total tests；
@@ -50,8 +50,8 @@ fn golden_base_apkparse() -> String {
 // GOLDEN-END apk/base.apkparse.norm.txt
 
 ///|
-/// L1 受控构建样本（WP-4 2026-11-07；javac/d8/aapt2/zipalign/apksigner 自产，
-/// 见 fixtures/build-fixtures.ps1）：fx-multidex-unsigned.apk（6058 字节）。
+/// L1 受控构建样本（javac/d8/aapt2/zipalign/apksigner 自产，见 tests/ASSETS.md）：
+/// fx-multidex-unsigned.apk（6058 字节）。
 /// 多 dex APK（classes.dex + classes2.dex），未签名。性质：**受控自产**。
 // FIXTURE-BEGIN apk/tests/fixtures/fx-multidex-unsigned.apk
 fn fixture_fx_multidex_unsigned_apk() -> Bytes {
@@ -105,7 +105,7 @@ fn golden_fx_multidex_v2v3_apkparse() -> String {
 
 ///|
 /// sig 链黄金常量（工具侧 apksigner verify 三个 SDK 仿真层并集；解析侧
-/// @apk.signatures() 结构存在性，不做密码学校验）。WP-4 2026-11-07 新增。
+/// @apk.signatures() 结构存在性，不做密码学校验）。
 // GOLDEN-BEGIN apk/tvshell-debug.sig.norm.txt
 fn golden_tvshell_sig() -> String {
   "SIG|V1\nSIG|V2\nSIG|V3\n"
@@ -156,7 +156,7 @@ fn fx_join(lines : Array[String]) -> String {
 }
 
 ///|
-/// 容器侧黄金规范化（与 fixtures/golden/apk/<id>.apkparse.norm.txt 同构）：
+/// 容器侧黄金规范化（期望值内嵌 golden_* 常量）：
 /// ENTR（中央目录条目）+ DEX（classes*.dex 列表）+ MANI/ARSC 字节长 + LIB（ABI）。
 /// ABI 来自 aapt2 badging 的 native-code；本样本无 .so，故无 LIB 行。
 fn fx_canon_apk(a : @apk.Apk) -> String raise @apk.ApkError {
@@ -177,8 +177,7 @@ fn fx_canon_apk(a : @apk.Apk) -> String raise @apk.ApkError {
 }
 
 ///|
-/// 签名方案黄金规范化（sig 子链，WP-4 2026-11-07 新增；与
-/// fixtures/golden/apk/<id>.sig.norm.txt 同构）：固定顺序 SIG|V1|V2|V3|V31，
+/// 签名方案黄金规范化（sig 子链，期望值内嵌 golden_* 常量）：固定顺序 SIG|V1|V2|V3|V31，
 /// 无任何签名方案时 SIG|NONE。解析侧 = @apk.signatures() 的结构存在性检测
 ///（verified 字段恒为 false，不做密码学校验）。
 fn fx_canon_sig(a : @apk.Apk) -> String raise @apk.ApkError {
@@ -254,8 +253,8 @@ test "golden apk base" {
 }
 
 ///|
-/// phone-1.6.0（118MB）与 tv-2.6.1（52MB）许可不明，二进制不入库，仅登记哈希 +
-/// aapt2 badging 黄金（fixtures/golden/apk/*.badge.norm.txt）。`#skip` 显式跳过解析侧。
+/// phone-1.6.0（118MB）与 tv-2.6.1（52MB）为许可不明的第三方样本，二进制不入库
+///（见 tests/ASSETS.md）。`#skip` 显式跳过解析侧，绝不冒充通过。
 #skip
 test "golden apk phone-1.6.0 [SKIPPED: 许可不明未入库]" {
   println(
@@ -272,7 +271,7 @@ test "golden apk tv-2.6.1 [SKIPPED: 许可不明未入库]" {
 }
 
 ///|
-/// L3 设备测试（本轮不执行）：仅保留接口与 skip 标记。启用条件：真机 + adb 拉取目标 APK 样本后，
+/// L3 设备测试（默认不执行）：仅保留接口与 skip 标记。启用条件：真机 + adb 拉取目标 APK 样本后，
 /// 用与本文件 L1/L2 相同的规范化字段做机上差分。
 #skip
 test "apk L3 device [SKIPPED: 本轮不执行真机测试]" {
@@ -302,7 +301,7 @@ test "golden apk fx-multidex-v2v3" {
 }
 
 ///|
-/// sig 子链黄金差分（WP-4 2026-11-07）：@apk.signatures() 结构存在性
+/// sig 子链黄金差分：@apk.signatures() 结构存在性
 /// == apksigner verify（三 SDK 仿真层并集）黄金。
 test "golden apk sig base" {
   let a = @apk.Apk::open(fixture_base_apk())
@@ -322,8 +321,8 @@ test "golden apk sig fx-multidex-v1" {
 }
 
 ///|
-/// v3 签名块样本的 sig 差分。WP-4 曾实测 @apk.signatures() 的 v3 signer 布局缺陷
-///（extract_certs sd_prefix=8 应为 0，BadSigningBlock），库包修复后本用例启用：
+/// v3 签名块样本的 sig 差分。开发期差分复核实测曾发现 @apk.signatures() 的 v3 signer 布局缺陷
+///（extract_certs sd_prefix=8 应为 0，BadSigningBlock），修复后本用例启用：
 /// 真实 apksigner v3 签名块的方案存在性 == apksigner verify 黄金。
 test "golden apk sig tvshell-debug" {
   let a = @apk.Apk::open(fixture_tvshell_apk())
@@ -358,7 +357,7 @@ test "smoke apk multi-dex fx-multidex-v2v3" {
 }
 
 ///|
-/// 签名方案变体冒烟（WP-4）：v1-only（META-INF JAR 签名、无 Signing Block）、
+/// 签名方案变体冒烟：v1-only（META-INF JAR 签名、无 Signing Block）、
 /// v2/v3（Signing Block、无 META-INF 签名条目）、unsigned（无任何方案）三变体
 /// 在 @apk 侧可观察区分。
 test "smoke apk 签名方案变体 fx-multidex" {

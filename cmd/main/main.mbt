@@ -1,7 +1,7 @@
 ///|
 /// apk-cli：APK 容器 CLI（hnlyxiaobing/apk 公开 API 驱动）。
 /// 契约（根 README.md）：退出码 0=成功 / 1=解析或IO错误 / 2=用法错误；
-/// 默认记录行输出（与 fixtures/golden/*.norm.txt 口径一致），`--json` 机器可读。
+/// 默认记录行输出（规范化口径见 tests/ASSETS.md），`--json` 机器可读。
 
 ///|
 let tool_name = "apk-cli"
@@ -22,7 +22,7 @@ fn usage_text() -> String {
     "      提取全部条目到目录（保留条目内路径，自动建子目录）",
     "  \{tool_name} --help",
     "",
-    "输出: 默认人类可读记录行（规范化口径与 fixtures/golden/*.norm.txt 一致）；",
+    "输出: 默认人类可读记录行（规范化口径见 tests/ASSETS.md）；",
     "      --json 输出单行 JSON（stdout）；错误信息一律走 stderr。",
     "退出码: 0=成功 1=解析或IO错误 2=用法错误",
   ])

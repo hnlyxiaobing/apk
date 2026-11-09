@@ -1,5 +1,5 @@
 ///|
-/// WP-3 CLI 公共辅助（apk-cli）：JSON 转义、十六进制渲染、记录行拼接。
+/// CLI 公共辅助（apk-cli）：JSON 转义、十六进制渲染、记录行拼接。
 /// 仅使用 moonbitlang/core 与本模块公开 API。
 
 ///|
