@@ -2,7 +2,7 @@
 
 > 2026-11-06 立约 ｜ 2026-11-09 更新（R4：签名摘要校验 / arsc 完整展开 / ELF ABI 交叉校验）
 > 状态：**已实现**（ZIP 索引 / 签名结构与摘要校验 / 资源表完整展开 / 惰性解压均为真实实现），
-> 门禁全绿（80/80，另有 5 个 `#skip` 不计入）。
+> 门禁全绿（84/84，另有 5 个 `#skip` 不计入）。
 
 ## 1. 分层位置与职责
 
@@ -90,7 +90,7 @@ APK Bytes ──► Apk::open ──► Apk(索引)
 | 黑盒（L1/L2 真实/受控样本） | 内嵌真实 `tvshell-debug.apk`（21208 B）与 `base.apk`（1179 B）及受控 `fx-multidex-*` 三变体；`aapt2 dump badging` + .NET `ZipFile` 中央目录规范化黄金 + `aapt2 dump resources` 资源表黄金 + `apksigner verify` 签名工具侧基准；期望值内嵌 `../fixtures_test.mbt` / `../arsc_test.mbt` | ✅ tvshell-debug、base、fx-multidex 三变体 |
 | 畸形派生（`../fixtures_malformed_test.mbt`） | 截断 / EOCD 签名污染 / 中央目录偏移污染 / 条目 CRC 污染 / 未知压缩方法 / 多 dex 截断与目录污染；断言报 `ApkError` 而非 panic | ✅ 6 例 |
 | 白盒（`../apk_wbtest.mbt`） | EOCD 定位、CRC-32、ABI/路径归类、SHA-256 NIST 向量 | ✅ |
-| 门禁 | `moon fmt --check` / `moon check --deny-warn` / `moon build` / `moon test` / 快照 | ✅ 80/80 |
+| 门禁 | `moon fmt --check` / `moon check --deny-warn` / `moon build` / `moon test` / 快照 | ✅ 84/84 |
 
 skip 机制：MoonBit 原生 `#skip` 属性（默认不计入 `Total tests`；`moon test --include-skipped` 才执行）。
 许可不明/体积过大的样本用 `#skip` 显式标注，**绝不冒充通过**（当前 5 个 skip：phone/tv/partyr/L3/真实 .so 差分）。

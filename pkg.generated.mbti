@@ -55,6 +55,25 @@ pub(all) struct DexEntry {
   bytes : Bytes
 }
 
+pub(all) enum ElfClass {
+  Elf32
+  Elf64
+}
+
+pub(all) struct ElfInfo {
+  elf_class : ElfClass
+  machine : Int32
+  needed : Array[String]
+  dynamic_symbols : Array[ElfSymbol]
+  jni_exports : Array[String]
+  dart_markers : Array[String]
+}
+
+pub(all) struct ElfSymbol {
+  name : String
+  defined : Bool
+}
+
 pub(all) struct ManifestRef {
   entry_name : String
   raw : Bytes
@@ -66,6 +85,9 @@ pub(all) struct NativeLib {
   bytes : Bytes
 }
 pub fn NativeLib::elf_abi(Self) -> Abi raise ApkError
+pub fn NativeLib::elf_info(Self) -> ElfInfo raise ApkError
+pub fn NativeLib::jni_exports(Self) -> Array[String] raise ApkError
+pub fn NativeLib::needed_libraries(Self) -> Array[String] raise ApkError
 
 pub(all) struct ResBag {
   parent : UInt32

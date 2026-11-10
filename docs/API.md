@@ -63,6 +63,53 @@
 | `ResTable::find_id(self, String, String) -> UInt32?` | 只读 | (类型名, 条目名) → id | 无状态 | 多包时取第一个 |
 | `Apk::entry(self, name : EntryName) -> Bytes raise ApkError` | `self` 只读 | 解压后原始字节 / `EntryNotFound` | 每次独立分配，可并发 | 压缩方法/CRC 校验 |
 
+## ELF 只读侦察（加法性新增）
+
+> 本节登记 P2 阶段的**加法性新增**：`ElfClass` / `ElfSymbol` / `ElfInfo` 三个 `pub(all)`
+> 值类型与 `NativeLib::elf_info` / `needed_libraries` / `jni_exports` 三个方法。既有公开签名
+> 零改动；错误**复用** R4 已有的 `ApkError::BadElf(offset, detail)`，**不新增**错误构造。
+> 快照见 `../pkg.generated.mbti`，归模块边界决策见 `DECISIONS.md` §8。
+
+### 新增类型
+
+| 类型 | 字段 | 含义 |
+|---|---|---|
+| `ElfClass` | `Elf32` / `Elf64` | 位宽，来自 `EI_CLASS`（1 / 2） |
+| `ElfSymbol` | `name : String` / `defined : Bool` | 动态符号名；`defined = st_shndx != SHN_UNDEF(0)`（未定义即导入） |
+| `ElfInfo` | 见下表 | `NativeLib::elf_info()` 的只读结构化结果，全为 `apk` 自有值类型与 `String` |
+
+`ElfInfo` 字段含义：
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `elf_class` | `ElfClass` | ELF 位宽 |
+| `machine` | `Int32` | `e_machine`（原样整数，不做 ABI 归类） |
+| `needed` | `Array[String]` | `DT_NEEDED` 依赖库名，按 dynamic 段顺序 |
+| `dynamic_symbols` | `Array[ElfSymbol]` | 动态符号表，按 dynsym 顺序；名字不可用（空 / 非 UTF-8 / 截断 / 含控制字符）的条目跳过 |
+| `jni_exports` | `Array[String]` | `dynamic_symbols` 中 `defined == true` 且名字以 `Java_` 开头者，按 dynsym 顺序 |
+| `dart_markers` | `Array[String]` | 命中的预设 Dart AOT marker 名，**去重、按预设顺序**；仅字节模式命中 |
+
+### 函数签名
+
+| 签名 | 返回 / 错误 | 说明 |
+|---|---|---|
+| `NativeLib::elf_info(self) -> ElfInfo raise ApkError` | 结构化只读结果 / `BadElf(offset, detail)` | 只读 `self.bytes` 的 ELF 头、program headers 与 `PT_DYNAMIC`；无状态、可并发 |
+| `NativeLib::needed_libraries(self) -> Array[String] raise ApkError` | `elf_info().needed` | 便利函数，内部委托 `elf_info()`，不重复解析 |
+| `NativeLib::jni_exports(self) -> Array[String] raise ApkError` | `elf_info().jni_exports` | 便利函数，内部委托 `elf_info()`，不重复解析 |
+
+### 边界（必须如实对外表述）
+
+- **只读索引**：只解析容器条目自身的 ELF 元数据（头 / program headers / `DT_*` / 动态符号名），
+  产出 `apk` 自有值类型，**不返回任何下游模块类型**（`axml` / `dex` 等），不编排下游解析。
+- **不做**反汇编 / 符号执行 / 重定位展开 / ELF 装载；与 `NativeLib::elf_abi()` 同构，
+  是「容器条目自身元数据」索引的加深，不使 `apk` 成为中心节点（见 `DECISIONS.md` §8）。
+- **不做** Dart AOT 快照格式解析：`dart_markers` 只是对字节做一次线性扫描的**字节模式命中**
+  （预设名去重、按预设顺序），对象图 / 指令表 / 快照版本语义 `[仍需实测]`，
+  不得据命中项断言任何 Dart 语义。
+- **错误模型**：越界 / 截断 / 坏 magic / 坏 `EI_CLASS` / `EI_DATA` / 缺 `PT_DYNAMIC` /
+  虚拟地址未落在 `PT_LOAD` / 坏 `DT_STRTAB` / 坏 `DT_HASH` 一律 `ApkError::BadElf`，
+  不 panic、不返回带部分结果的静默成功。
+
 ## 错误构造速查
 
 `UnexpectedEof` · `NotAZip` · `BadCentralDirectory(offset, detail)` · `Zip64Unsupported` · `EntryNotFound(name)` · `BadSigningBlock(offset, detail)` · `UnsupportedSignatureScheme` · `BadAlignment(name, offset)` · `BadResourceTable(offset, detail)` · `BadElf(offset, detail)`
@@ -77,7 +124,7 @@
 |---|---|
 | `moon check --deny-warn` | ✅ 0 error / 0 warning（无 `0068`） |
 | `moon build` | ✅ |
-| `moon test` | ✅ 80 / 80（含真实/受控样本冒烟、黄金差分、合成 v1 签名、合成 arsc、合成 ELF、畸形派生；另有 5 个 `#skip` 用例不计入） |
+| `moon test` | ✅ 84 / 84（含真实/受控样本冒烟、黄金差分、合成 v1 签名、合成 arsc、合成 ELF、畸形派生；另有 5 个 `#skip` 用例不计入） |
 | `moon fmt --check` | ✅ |
 | 快照门禁（`moon info` + `git diff --exit-code`） | ✅ |
 
