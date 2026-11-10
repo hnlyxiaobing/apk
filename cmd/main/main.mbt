@@ -19,7 +19,8 @@ fn usage_text() -> String {
     "  \{tool_name} extract <apk> --entry <name> --out <file> [--json]",
     "      按条目名提取单个条目（classes.dex / classes2.dex / 任意条目均可）",
     "  \{tool_name} extract <apk> --all --out <dir> [--json]",
-    "      提取全部条目到目录（保留条目内路径，自动建子目录）",
+    "      提取全部条目到目录（保留条目内路径，自动建子目录；",
+    "      绝对路径 / .. / 反斜杠 / 盘符等不安全条目名一律拒绝，退出码 1）",
     "  \{tool_name} --help",
     "",
     "输出: 默认人类可读记录行（规范化口径见 tests/ASSETS.md）；",
@@ -58,6 +59,32 @@ fn parent_dir(path : String) -> String {
   } else {
     path[0:cut].to_owned()
   }
+}
+
+///|
+/// ZIP 条目名是否可安全拼接到 `--all` 的输出目录下：拒绝绝对路径、盘符 /
+/// 备用数据流（`:`）、反斜杠与控制字符，以及空段 / `.` / `..` 段。
+/// 不安全的条目名会让写入逃逸 `--out`（路径穿越）。
+fn is_safe_entry_name(name : String) -> Bool {
+  if name == "" {
+    return false
+  }
+  let mut segment = ""
+  for c in name.iter() {
+    let v = c.to_int()
+    if v < 0x20 || v == 0x7F || c == '\\' || c == ':' {
+      return false
+    }
+    if c == '/' {
+      if segment == "" || segment == "." || segment == ".." {
+        return false
+      }
+      segment = ""
+    } else {
+      segment = segment + c.to_string()
+    }
+  }
+  segment != "" && segment != "." && segment != ".."
 }
 
 ///|
@@ -281,6 +308,17 @@ async fn cmd_extract(rest : ArrayView[String]) -> Int32 {
   let out_names : Array[String] = []
   let out_sizes : Array[Int32] = []
   let out_dests : Array[String] = []
+  if all {
+    // 先整体预检：任何不安全条目都直接失败，避免写出部分条目后才发现。
+    for name in names {
+      if !is_safe_entry_name(name) {
+        eprintln(
+          "error: 拒绝不安全的条目名（可能逃逸 --out）：\{name}",
+        )
+        return 1
+      }
+    }
+  }
   for name in names {
     let bytes = a.entry(name)
     let dest = if all { out_path + "/" + name } else { out_path }
