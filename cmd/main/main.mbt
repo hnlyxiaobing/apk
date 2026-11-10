@@ -20,7 +20,8 @@ fn usage_text() -> String {
     "      按条目名提取单个条目（classes.dex / classes2.dex / 任意条目均可）",
     "  \{tool_name} extract <apk> --all --out <dir> [--json]",
     "      提取全部条目到目录（保留条目内路径，自动建子目录；",
-    "      绝对路径 / .. / 反斜杠 / 盘符等不安全条目名一律拒绝，退出码 1）",
+    "      绝对路径 / .. / 反斜杠 / 盘符等不安全条目名一律拒绝，退出码 1；",
+    "      单个条目解压后大小上限 256 MiB，超出退出码 1）",
     "  \{tool_name} --help",
     "",
     "输出: 默认人类可读记录行（规范化口径见 tests/ASSETS.md）；",
@@ -62,6 +63,16 @@ fn parent_dir(path : String) -> String {
 }
 
 ///|
+/// 单个条目解压后大小上限（256 MiB）。
+let max_extract_bytes : Int32 = 256 * 1024 * 1024
+
+///|
+/// 检查 `size` 是否未超过 `max_extract_bytes`，供 extract 路径与回归测试共用。
+fn is_extract_size_allowed(size : Int32) -> Bool {
+  size <= max_extract_bytes
+}
+
+///|
 /// ZIP 条目名是否可安全拼接到 `--all` 的输出目录下：拒绝绝对路径、盘符 /
 /// 备用数据流（`:`）、反斜杠与控制字符，以及空段 / `.` / `..` 段。
 /// 不安全的条目名会让写入逃逸 `--out`（路径穿越）。
@@ -85,6 +96,20 @@ fn is_safe_entry_name(name : String) -> Bool {
     }
   }
   segment != "" && segment != "." && segment != ".."
+}
+
+///|
+/// 在中央目录索引中按名查找条目元数据（供 extract 大小预检）。
+fn find_entry_ref(
+  entries : Array[@apk.ZipEntryRef],
+  name : String,
+) -> @apk.ZipEntryRef? {
+  for e in entries {
+    if e.name == name {
+      return Some(e)
+    }
+  }
+  None
 }
 
 ///|
@@ -320,7 +345,23 @@ async fn cmd_extract(rest : ArrayView[String]) -> Int32 {
     }
   }
   for name in names {
+    match find_entry_ref(a.entries(), name) {
+      Some(e) =>
+        if e.uncompressed_size > max_extract_bytes.to_uint64() {
+          eprintln(
+            "error: 条目 '\{name}' 声明的解压大小 \{e.uncompressed_size} 超过上限 \{max_extract_bytes}",
+          )
+          return 1
+        }
+      None => ()
+    }
     let bytes = a.entry(name)
+    if !is_extract_size_allowed(bytes.length()) {
+      eprintln(
+        "error: 条目 '\{name}' 解压后大小 \{bytes.length()} 超过上限 \{max_extract_bytes}",
+      )
+      return 1
+    }
     let dest = if all { out_path + "/" + name } else { out_path }
     @fs.mkdir(parent_dir(dest), recursive=true, allow_exist=true)
     @fs.write_binary(dest, bytes)

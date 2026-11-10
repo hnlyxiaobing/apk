@@ -216,3 +216,186 @@ test "whitebox error paths: arsc DER signing block ELF" {
   }
   assert_true(elf_hit, msg="bad ELF must raise BadElf")
 }
+
+///|
+/// UInt64 移位、循环右移与大端读取（SHA-512 前置检查）。
+test "uint64 shifts rotr and be_u64" {
+  assert_eq(0x0123456789abcdefUL << 4, 0x123456789abcdef0UL)
+  assert_eq(0x0123456789abcdefUL >> 4, 0x00123456789abcdeUL)
+  assert_eq(rotr64(0x0123456789abcdefUL, 4), 0xf0123456789abcdeUL)
+  assert_eq(
+    be_u64(b"\x01\x23\x45\x67\x89\xab\xcd\xef", 0),
+    0x0123456789abcdefUL,
+  )
+  assert_eq(
+    be_u64(b"\xff\xff\xff\xff\xff\xff\xff\xff", 0),
+    0xFFFFFFFFFFFFFFFFUL,
+  )
+  assert_eq(0xFFFFFFFFFFFFFFFEUL + 2UL, 0UL)
+  assert_eq(0x0000000100000000UL + 1UL, 0x0000000100000001UL)
+  // 验证 sha512 字节提取方式（高 bit 不丢失）。
+  let x = 0xcf83e1357eefb8bdUL
+  let b0 = ((x >> 56) & 0xFF).to_int().to_byte()
+  let b1 = ((x >> 48) & 0xFF).to_int().to_byte()
+  assert_eq(b0.to_int(), 0xcf)
+  assert_eq(b1.to_int(), 0x83)
+  // MoonBit `UInt64 >> n` 在 n>=64 时按模 64 回绕；sha512 长度编码已手动规避。
+  assert_eq(24UL >> 64, 24UL)
+  assert_eq(24UL >> 120, 0UL)
+  assert_eq(0x0F0F0F0F0F0F0F0FUL ^ 0xF0F0F0F0F0F0F0F0UL, 0xFFFFFFFFFFFFFFFFUL)
+  assert_eq(0x0F0F0F0F0F0F0F0FUL & 0xF0F0F0F0F0F0F0F0UL, 0UL)
+  // SHA-512 实际用到的旋转量（与正确值逐项对账）。
+  let y = 0x0123456789abcdefUL
+  assert_eq(rotr64(y, 1), 0x8091a2b3c4d5e6f7UL)
+  assert_eq(rotr64(y, 8), 0xef0123456789abcdUL)
+  assert_eq(rotr64(y, 7), 0xde02468acf13579bUL)
+  assert_eq(rotr64(y, 19), 0x79bde02468acf135UL)
+  assert_eq(rotr64(y, 61), 0x091a2b3c4d5e6f78UL)
+  assert_eq(rotr64(y, 14), 0x37bc048d159e26afUL)
+  assert_eq(rotr64(y, 18), 0xf37bc048d159e26aUL)
+  assert_eq(rotr64(y, 41), 0xb3c4d5e6f78091a2UL)
+  assert_eq(rotr64(y, 28), 0x9abcdef012345678UL)
+  assert_eq(rotr64(y, 34), 0xe26af37bc048d159UL)
+  assert_eq(rotr64(y, 39), 0xcf13579bde02468aUL)
+  // 拆解 n=7 的两个移位，定位 rotr64 错误来源。
+  assert_eq(y >> 7, 0x0002468acf13579bUL)
+  assert_eq(y << 57, 0xde00000000000000UL)
+}
+
+///|
+/// 校验 SHA-512 常量数组未被截断或错位。
+test "sha512 constants integrity" {
+  assert_eq(sha512_iv.length(), 8)
+  assert_eq(sha512_iv[0], 0x6a09e667f3bcc908UL)
+  assert_eq(sha512_iv[7], 0x5be0cd19137e2179UL)
+  assert_eq(sha512_k.length(), 80)
+  assert_eq(sha512_k[0], 0x428a2f98d728ae22UL)
+  assert_eq(sha512_k[79], 0x6c44198c4a475817UL)
+}
+
+///|
+/// SHA-512 已知向量（FIPS 180-4）。
+test "sha512 known vector empty" {
+  assert_eq(
+    w_hex(sha512(b"")),
+    "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e",
+  )
+}
+
+///|
+test "sha512 known vector abc" {
+  assert_eq(
+    w_hex(sha512(b"abc")),
+    "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",
+  )
+}
+
+///|
+test "sha512 known vector a" {
+  assert_eq(
+    w_hex(sha512(b"a")),
+    "1f40fc92da241694750979ee6cf582f2d5d7d28e18335de05abc54d0560e0f5302860c652bf08d560252aa5e74210546f369fbbbce8c12cfc7957b2652fe9a75",
+  )
+}
+
+///|
+test "sha512 128 zero bytes" {
+  let zeros : Array[Byte] = []
+  for i = 0; i < 128; i = i + 1 {
+    zeros.push(b'\x00')
+  }
+  assert_eq(
+    w_hex(sha512(Bytes::from_array(zeros[:]))),
+    "ab942f526272e456ed68a979f50202905ca903a141ed98443567b11ef0bf25a552d639051a01be58558122c58e3de07d749ee59ded36acf0c55cd91924d6ba11",
+  )
+}
+
+///|
+/// 构造最小 APK 字节：section1 + 签名块 + 中央目录 + EOCD；
+/// 只供 `content_digest` 白盒测试使用（不经过 `Apk::open` 完整校验）。
+fn w_dummy_apk(_sb : Int32, cd_off : Int32, cd_size : Int32) -> Bytes {
+  let eocd = cd_off + cd_size
+  let buf : Array[Byte] = []
+  for i = 0; i < eocd; i = i + 1 {
+    buf.push((i % 256).to_byte())
+  }
+  // EOCD
+  w_push_u32(buf, 0x06054b50)
+  w_push_u16(buf, 0)
+  w_push_u16(buf, 0)
+  w_push_u16(buf, 1)
+  w_push_u16(buf, 1)
+  w_push_u32(buf, cd_size)
+  w_push_u32(buf, cd_off)
+  w_push_u16(buf, 0)
+  Bytes::from_array(buf[:])
+}
+
+///|
+/// v2/v3 内容摘要算法 ID 映射：只认 AOSP `CONTENT_DIGEST_*`，
+/// 签名算法 ID（0x0201/0x0301）不再被误映射为 SHA-256。
+test "whitebox: content digest algorithm id mapping" {
+  assert_eq(content_digest_algorithm_name(0x0101U), "SHA-256")
+  assert_eq(content_digest_algorithm_name(0x0103U), "SHA-256")
+  assert_eq(content_digest_algorithm_name(0x0104U), "SHA-256")
+  assert_eq(content_digest_algorithm_name(0x0102U), "SHA-512")
+  assert_eq(content_digest_algorithm_name(0x0105U), "SHA-512")
+  assert_eq(content_digest_algorithm_name(0x0201U), "unknown")
+  assert_eq(content_digest_algorithm_name(0x0301U), "unknown")
+}
+
+///|
+/// v2 内容摘要聚合语义：按记录算法分别计算 SHA-256/SHA-512，并与 signer digest 比对。
+test "whitebox: v2 content digest aggregation" {
+  let sb = 32
+  let cd_off = 64
+  let cd_size = 48
+  let source = w_dummy_apk(sb, cd_off, cd_size)
+  let apk : Apk = {
+    source,
+    entries: [],
+    signing_block_off: Some(sb.to_uint64()),
+  }
+  let d256 = apk.content_digest("SHA-256").unwrap()
+  assert_eq(d256.length(), 32, msg="SHA-256 内容摘要长度")
+  let d512 = apk.content_digest("SHA-512").unwrap()
+  assert_eq(d512.length(), 64, msg="SHA-512 内容摘要长度")
+  let rec256 : SigRecord = {
+    scheme: SignatureScheme::V2,
+    block_id: 0x7109871aU,
+    certs: [b"cert"],
+    digests: [{ algorithm: 0x0101U, digest: d256, }],
+    pkcs7_ok: true,
+    v1_sf: None,
+    v1_manifest: None,
+  }
+  let check256 = apk.verify_v2(rec256)
+  assert_true(check256.structure_ok, msg="结构完整")
+  assert_true(check256.digest_ok, msg="SHA-256 内容摘要一致")
+  let rec512 : SigRecord = {
+    scheme: SignatureScheme::V2,
+    block_id: 0x7109871aU,
+    certs: [b"cert"],
+    digests: [{ algorithm: 0x0102U, digest: d512, }],
+    pkcs7_ok: true,
+    v1_sf: None,
+    v1_manifest: None,
+  }
+  let check512 = apk.verify_v2(rec512)
+  assert_true(check512.digest_ok, msg="SHA-512 内容摘要一致")
+  // 签名算法 ID 0x0201 不应被当作 SHA-256，digest_ok 保持 false。
+  let rec_bad : SigRecord = {
+    scheme: SignatureScheme::V2,
+    block_id: 0x7109871aU,
+    certs: [b"cert"],
+    digests: [{ algorithm: 0x0201U, digest: d256, }],
+    pkcs7_ok: true,
+    v1_sf: None,
+    v1_manifest: None,
+  }
+  let check_bad = apk.verify_v2(rec_bad)
+  assert_true(
+    !check_bad.digest_ok,
+    msg="签名算法 ID 不参与内容摘要聚合",
+  )
+}

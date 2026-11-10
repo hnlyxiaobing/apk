@@ -329,29 +329,35 @@ fn Apk::verify_v2(self : Apk, rec : SigRecord) -> SignatureCheck {
       "signer has no certificate or no digest record",
     )
   }
-  let computed : Bytes? = self.content_digest()
   let mut digest_ok = false
   let mut algorithm = ""
+  let mut computed_some = false
   for d in rec.digests {
     let name = content_digest_algorithm_name(d.algorithm)
     if algorithm == "" {
       algorithm = name
     }
-    match computed {
-      Some(c) => if name == "SHA-256" && d.digest == c { digest_ok = true }
+    if name != "SHA-256" && name != "SHA-512" {
+      continue
+    }
+    match self.content_digest(name) {
+      Some(c) => {
+        computed_some = true
+        if d.digest == c {
+          digest_ok = true
+        }
+      }
       None => ()
     }
   }
   let detail = if digest_ok {
     "content digest (" + algorithm + ") matched; signature NOT verified"
+  } else if computed_some {
+    "content digest mismatch or unsupported algorithm (" +
+    algorithm +
+    "); signature NOT verified"
   } else {
-    match computed {
-      Some(_) =>
-        "content digest mismatch or unsupported algorithm (" +
-        algorithm +
-        "); signature NOT verified"
-      None => "APK content digest could not be computed; signature NOT verified"
-    }
+    "APK content digest could not be computed; signature NOT verified"
   }
   {
     scheme: rec.scheme,
@@ -366,20 +372,26 @@ fn Apk::verify_v2(self : Apk, rec : SigRecord) -> SignatureCheck {
 }
 
 ///|
-/// v2/v3 签名算法 ID → 内容摘要算法名。
+/// v2/v3 内容摘要算法 ID → 摘要算法名。
+/// 只认 AOSP `CONTENT_DIGEST_*` ID（0x0101/0x0103/0x0104=SHA-256；0x0102/0x0105=SHA-512）；
+/// 0x0201/0x0301 等是签名算法 ID，不参与内容摘要聚合。
 fn content_digest_algorithm_name(id : UInt32) -> String {
   match id {
-    0x0101U | 0x0103U | 0x0201U | 0x0301U => "SHA-256"
-    0x0102U | 0x0104U | 0x0202U => "SHA-512"
+    0x0101U | 0x0103U | 0x0104U => "SHA-256"
+    0x0102U | 0x0105U => "SHA-512"
     _ => "unknown"
   }
 }
 
 ///|
-/// 计算 v2/v3 规范的 APK 内容分块摘要（SHA-256）。
-///
+/// 计算 v2/v3 规范的 APK 内容分块摘要。`algorithm` 为 "SHA-256" 或 "SHA-512"；
 /// 只在存在 APK Signing Block 时有意义；EOCD 的中央目录偏移字段改写为块起始偏移。
-fn Apk::content_digest(self : Apk) -> Bytes? {
+fn Apk::content_digest(self : Apk, algorithm : String) -> Bytes? {
+  let hash_fn = match algorithm {
+    "SHA-256" => sha256
+    "SHA-512" => sha512
+    _ => return None
+  }
   let sb = match self.signing_block_off {
     Some(v) => v.to_int()
     None => return None
@@ -400,8 +412,8 @@ fn Apk::content_digest(self : Apk) -> Bytes? {
     return None
   }
   let chunk_digests : Array[Bytes] = []
-  chunk_append(source, 0, sb, chunk_digests)
-  chunk_append(source, cd_off, cd_off + cd_size, chunk_digests)
+  chunk_append(source, 0, sb, chunk_digests, hash_fn)
+  chunk_append(source, cd_off, cd_off + cd_size, chunk_digests, hash_fn)
   // EOCD 副本：中央目录偏移（+16）改写为 signing block 起始偏移。
   let eocd_buf : Array[Byte] = []
   for i = 0; i < eocd_len; i = i + 1 {
@@ -412,7 +424,7 @@ fn Apk::content_digest(self : Apk) -> Bytes? {
   eocd_buf[17] = ((sb_u >> 8) & 0xFFU).reinterpret_as_int().to_byte()
   eocd_buf[18] = ((sb_u >> 16) & 0xFFU).reinterpret_as_int().to_byte()
   eocd_buf[19] = ((sb_u >> 24) & 0xFFU).reinterpret_as_int().to_byte()
-  chunk_digests.push(chunk_digest_of(Bytes::from_array(eocd_buf[:])))
+  chunk_digests.push(chunk_digest_of(Bytes::from_array(eocd_buf[:]), hash_fn))
   // 外层：0x5a || chunk_count(u32le) || chunk digests
   let outer : Array[Byte] = []
   outer.push(b'\x5a')
@@ -422,7 +434,7 @@ fn Apk::content_digest(self : Apk) -> Bytes? {
       outer.push(x)
     }
   }
-  Some(sha256(Bytes::from_array(outer[:])))
+  Some(hash_fn(Bytes::from_array(outer[:])))
 }
 
 ///|
@@ -432,6 +444,7 @@ fn chunk_append(
   start : Int32,
   end : Int32,
   out : Array[Bytes],
+  hash_fn : (Bytes) -> Bytes,
 ) -> Unit {
   let chunk_size = 1048576
   let mut pos = start
@@ -441,21 +454,21 @@ fn chunk_append(
     for i = pos; i < pos + take; i = i + 1 {
       buf.push(source[i])
     }
-    out.push(chunk_digest_of(Bytes::from_array(buf[:])))
+    out.push(chunk_digest_of(Bytes::from_array(buf[:]), hash_fn))
     pos = pos + take
   }
 }
 
 ///|
-/// 单片摘要：SHA-256(0xa5 || chunk_len_u32le || chunk)。
-fn chunk_digest_of(chunk : Bytes) -> Bytes {
+/// 单片摘要：algorithm(0xa5 || chunk_len_u32le || chunk)。
+fn chunk_digest_of(chunk : Bytes, hash_fn : (Bytes) -> Bytes) -> Bytes {
   let buf : Array[Byte] = []
   buf.push(b'\xa5')
   push_u32_le(buf, chunk.length())
   for x in chunk {
     buf.push(x)
   }
-  sha256(Bytes::from_array(buf[:]))
+  hash_fn(Bytes::from_array(buf[:]))
 }
 
 ///|
