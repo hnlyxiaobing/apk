@@ -1,68 +1,98 @@
-# hnlyxiaobing/apk
+# apk · APK 容器解析
 
-**APK 容器层解析库 —— ZIP 目录索引、签名结构与摘要校验、manifest 引用、dex 列表、native 库 ABI 归类与 resources.arsc 完整展开。**
+> 独立发布单元 ｜ L1 逆向输入 ｜ `preferred_target = wasm` ｜ Apache-2.0
+> 状态：`moon test` **93/93** 通过（2026-11-11 本机实测，另有 5 个 `#skip` 用例不计入）；本文件是本仓库**唯一**说明文档。
+> 公开 API 以 `pkg.generated.mbti` 为准（由 `moon info` 生成，禁手工编辑）；加法性变更须登记簿记 + 快照审阅 + 快照门禁。
 
-> 状态：**已实现并门禁全绿**（2026-11-09 R4 复核）。`moon check --deny-warn` 0 error / 0 warning；
-> `moon test` **93/93**（含真实样本、合成 v1 签名 / arsc / ELF 与畸形派生用例、SHA-512 白盒向量与 `apk-cli extract` 大小上限回归测试；另有 5 个 `#skip` 用例
-> 显式跳过、不计通过）。
+## 1. 定位与边界
 
-## 定位与为什么存在
+把 APK（ZIP 容器）读成可信的条目索引与原始字节，供上层清单与代码解析消费。
 
-2026-11-06 检索 mooncakes.io：`apk` 唯一命中是 `Xpeng/linuxpkg@0.5.0`（**Alpine Linux `.apk`**，非 Android），Android APK 容器层完全缺失；而 ZIP / ELF / PE / Mach-O 等通用容器已有包 → 纯 MoonBit 自研。APK 是所有 Android 逆向与审计工作的入口。
+**能力**
 
-**关键设计决策（详见 `docs/DECISIONS.md` §1）**：曾有方案写「`apk` 依赖 `zip + axml + dex`，只做编排」，这会把 `apk` 变成中心节点、泄漏下游类型、并形成循环风险。本库改为——**容器层只产出原始字节与索引**，由组合根决定是否调用 `axml` / `dex`。因此 `apk` 可与两者并行开发，且任何使用者可只依赖 `apk` 做审计。
+- 中央目录 / local 头索引与条目提取，支持多 dex（`classes*.dex`），拒绝 ZIP64
+- aapt2 裸对齐填充兼容（`zipmin.mbt`）；v1 / v2 / v3 / v3.1 签名块结构解析与摘要校验
+- `AndroidManifest.xml`、`resources.arsc`、`classes.dex` 等条目的定位与字节提取
+- ELF 只读侦察：`DT_NEEDED`、`Java_*` JNI 导出、Dart AOT 标记（2026-11-10 加法性子能力）
+- `apk-cli list` / `extract`（`--all` / `--entry` / `--json`）
 
-## 能力范围 / 非目标
+**非目标**
 
-- **做**：ZIP 中央目录索引（EOCD / ZIP64 / 对齐）、APK Signing Block 定位与 v1/v2/v3/v3.1
-  **结构 + 摘要**校验、`AndroidManifest.xml` 原始字节引用、`classes*.dex` 列表、
-  `lib/<abi>/*.so` ABI 归类（`NativeLib::elf_abi` 做 ELF 头交叉校验）、`resources.arsc`
-  **完整展开**（package/typeSpec/type/复杂 bag）、按条目名惰性解压。
-- **不做**：反编译、反汇编、manifest 语义解释、**签名写入**、打包、修改 ZIP、
-  **RSA/ECDSA/DSA 公钥验签与证书链校验**、arsc 值渲染/主题求值/bag 压平。
-- **签名校验边界（重要）**：`SignatureInfo.verified == true` 仅表示「结构解析通过 + 本地可验证
-  摘要一致」（v1 MANIFEST 条目摘要 + `.SF` 清单摘要；v2/v3 内容分块 SHA-256 摘要），
-  **不代表签名有效**；`Apk::signature_checks()` 的 `signature_verified` 恒为 `false`。
-  详见 `docs/DECISIONS.md` §5 与 `docs/API.md` 文首。
+- 不解析 AXML / DEX 语义，不编排下游解析，不返回下游类型
+- 不做 Java 反编译、CFG、签名写入；不修改 APK
+- `signature_verified` 恒为 false，只是结构字段，**不是签名有效性结论**
+- 不 import 任何其他工作区模块
 
-## 公开接口（速览）
+## 2. 关键设计决策（本仓库自足记录）
 
-`Apk::open(Bytes)`、`Apk::{entries, manifest, dex_files, native_libs, signatures, signature_checks, resource_table, resource_table_full, entry}`、
-`NativeLib::elf_abi`、`parse_resources_arsc(Bytes)`。完整签名见 `docs/API.md`。
+- 容器层只产出 `Bytes` 与索引值（ADR-0003 主决策）；下游靠 Wire `Blob` 承接。
+- 2026-11-07 把 `resources.arsc` 完整展开归 `axml`；本仓库后来也保留了一份实现，两份并存属已登记未决项。
+- 2026-11-10 ELF 只读侦察以纯插入方式落地，不改原决策、`ApkError` 复用 `BadElf`。
+- 唯一第三方依赖 `bobzhang/zip@0.1.2`（仅 deflate）；aapt2 在 1,028 个 local 头中 403 个写 1~3 B 裸填充，已规避并转永久回归。
 
-## 依赖
+## 3. 公开 API 索引（自动抽取 `pkg.generated.mbti` 的 `pub` 声明行；完整字段见快照）
 
-- 依赖：**`bobzhang/zip@0.1.2`**（Apache-2.0，纯 MoonBit，全后端）—— 已在 `moon.mod` `import` 锁版，仅使用其 `deflate` 解压（`moon.pkg` 引 `bobzhang/zip/deflate`）。五门槛审计结论（用途/许可/平台/维护 4 项通过、0 不通过、1 项风险登记：**单人维护、star=0、低 bus factor，登记不阻断**）详见 `docs/DECISIONS.md` §3。独立 `moon.mod`，`moon check` 独立通过。
+```text
+pub fn parse_resources_arsc(Bytes) -> ResTable raise ApkError
+pub(all) enum Abi {
+pub(all) struct Apk {
+pub fn Apk::dex_files(Self) -> Array[DexEntry] raise ApkError
+pub fn Apk::entries(Self) -> Array[ZipEntryRef]
+pub fn Apk::entry(Self, String) -> Bytes raise ApkError
+pub fn Apk::manifest(Self) -> ManifestRef raise ApkError
+pub fn Apk::native_libs(Self, Abi?) -> Array[NativeLib] raise ApkError
+pub fn Apk::open(Bytes) -> Self raise ApkError
+pub fn Apk::resource_table(Self) -> ResourceTableRef? raise ApkError
+pub fn Apk::resource_table_full(Self) -> ResTable? raise ApkError
+pub fn Apk::signature_checks(Self) -> Array[SignatureCheck] raise ApkError
+pub fn Apk::signatures(Self) -> Array[SignatureInfo] raise ApkError
+pub(all) struct DexEntry {
+pub(all) enum ElfClass {
+pub(all) struct ElfInfo {
+pub(all) struct ElfSymbol {
+pub(all) struct ManifestRef {
+pub(all) struct NativeLib {
+pub fn NativeLib::elf_abi(Self) -> Abi raise ApkError
+pub fn NativeLib::elf_info(Self) -> ElfInfo raise ApkError
+pub fn NativeLib::jni_exports(Self) -> Array[String] raise ApkError
+pub fn NativeLib::needed_libraries(Self) -> Array[String] raise ApkError
+pub(all) struct ResBag {
+pub(all) struct ResConfig {
+pub fn ResConfig::is_default(Self) -> Bool
+pub(all) enum ResDataType {
+pub(all) struct ResEntry {
+pub(all) enum ResEntryValue {
+pub(all) struct ResLookup {
+pub(all) struct ResMap {
+pub(all) struct ResPackage {
+pub(all) struct ResTable {
+pub fn ResTable::find_id(Self, String, String) -> UInt32?
+pub fn ResTable::lookup(Self, UInt32) -> ResLookup?
+pub fn ResTable::lookup_all(Self, UInt32) -> Array[ResLookup]
+pub fn ResTable::package_by_id(Self, Int32) -> ResPackage?
+pub(all) struct ResTypeConfig {
+pub(all) struct ResTypeSpec {
+pub(all) struct ResValue {
+pub(all) struct ResourceTableRef {
+pub(all) struct SignatureCheck {
+pub(all) struct SignatureInfo {
+pub(all) enum SignatureScheme {
+pub(all) struct ZipEntryRef {
+```
 
-## 平台与许可风险
+## 4. 依赖、平台与许可
 
-- 平台：全后端（`preferred_target = "wasm"`，未改动）；桌面即可测试。
-- 许可：本仓库 Apache-2.0；APK Signing Block 规范来自 AOSP（CC-BY-4.0 文档 / Apache-2.0 代码）。无外部二进制。
-- 风险：ZIP64 与 4 字节对齐；`"APK Sig Block 42"` 魔数与 ID-value 对（v2 `0x7109871a`、v3 `0xf05368c0`、v3.1 `0x1b93ad61`）；`resources.arsc` 复杂度（package / typeSpec / sparse-compact entry / overlay）——完整展开已实现并用 `aapt2 dump resources` 对账。
-- **签名**：SHA-256 为纯 MoonBit 实现；v2/v3 内容摘要按 AOSP 分块口径（`0xa5`/`0x5a` 前缀）实测对齐。**未做**公钥验签、证书链、SHA-512 / verity 摘要；`verified` 不得对外表述为「已验签」。
-- **注意**：`SignatureInfo.verified` 的严格语义见 `docs/DECISIONS.md` §5；需要机器可读边界时用 `signature_checks()[i].signature_verified`（恒 false）。
+`bobzhang/zip@0.1.2`（唯一第三方依赖，仅用 deflate）；`preferred_target = wasm`；Apache-2.0。
 
-## 测试与验收
+## 5. 命令行与验证
 
-- **测试策略（现状）**：L0 程序化 fixture（stored/deflate 条目、签名块魔数、畸形中央目录、ZIP64 拒绝、对齐；合成 v1 JAR 签名、合成 arsc、合成 ELF）；L1 真实/受控样本内嵌（tvshell-debug.apk 21208 B、base.apk 1179 B、fx-multidex-* 三变体）+ L2 黄金：`aapt2 dump badging` 与 .NET `ZipFile` 中央目录规范化、`aapt2 dump resources` 资源表、`apksigner verify` 签名工具侧基准，**黄金期望值已内嵌测试代码，`moon test` 即回归**。畸形派生 6 例（截断 / EOCD 污染 / CD 偏移污染 / CRC 污染 / 未知压缩方法 / 多 dex 截断与目录污染，均断言报 `ApkError` 而非 panic）。
-- **验收状态**：条目清单 / DEX 列表 / manifest 与 `resources.arsc` 字节长 / ABI（`native-code`）与独立实现一致；arsc 完整展开与 `aapt2 dump resources` 逐值一致；签名结构与摘要与 `apksigner verify` 方案并集一致。**package / version / sdk / permissions / activity 属 manifest 语义，不在本模块范围**，其解析侧差分由 axml 解析器承担。
-- 依赖资产：受控自建与 AOSP 来源的提取样本已入库 `tests/fixtures/`（来源、哈希与规范化口径见 `tests/ASSETS.md`）；目标游戏 APK（phone/tv/partyr）许可不明、未入库，开发期做过差分复核；非空 `.so` 用测试内合成 ELF 覆盖，真实 `.so` 差分 `[仍需实测]`。
+- `moon run cmd/main --target native -- list <apk> [--json]` / `extract <apk> --entry <name> --out <file>`；输出行 `ENTR|` `DEX|` `MANI|` `ARSC|` `LIB|`。
+- 复验：`moon clean` → `moon check --deny-warn` → `moon build` → `moon test` → `moon fmt --check` → `moon info` 后检查 `pkg.generated.mbti` 无意外 diff。
+- 本仓库为独立 Git 仓库，文档与 CI 均自包含，不依赖工作区其他目录。
 
-## 当前状态 / 交付产物
+## 6. 风险与未决
 
-| 项 | 状态 |
-|---|---|
-| `apk.mbt` / `arsc.mbt` / `signature.mbt` / `crypto.mbt` 数据结构 + 文档注释 | ✅ |
-| `pkg.generated.mbti` API 快照 | ✅ |
-| ZIP 索引 / 签名结构与摘要 / arsc 完整展开 / ELF ABI 交叉校验 / 惰性解压 | ✅ 真实实现（无 `declare`） |
-| `ContainerIndex for Apk`（API 冻结前加法性追认） | ✅ 见 `docs/API.md` |
-| L1 真实样本 + L2 黄金 + 差分复核 | ✅ |
-| `moon check --deny-warn` / `moon build` / `moon test` / `moon fmt --check` / 快照 | ✅ 全绿（93/93） |
+- 与 `axml` 的 `resources.arsc` 解析实现重复，尚未裁决去重方式。
+- 第三方 APK 许可不明，禁止入库；受控自建样本与哈希登记见本仓库 `tests/fixtures/`。
+- `zip@0.1.2` 单人维护、star=0 的 bus factor 风险已登记，不阻断使用。
 
-## 开发排序说明
-
-`apk` 提前到第一批开发（与 `axml` / `dex` 并行），不等待下游解析库完成——理由与后果见 `docs/DECISIONS.md` §4。
-
-## 文档索引
-
-`docs/DESIGN.md` · `docs/API.md` · `docs/DECISIONS.md` · `tests/ASSETS.md`

@@ -1,12 +1,7 @@
 # hnlyxiaobing/apk
 
-> 2026-11-09 R4 复核：本包 ZIP 索引、签名**结构+摘要**校验、`resources.arsc` 完整展开、ELF ABI
-> 交叉校验与惰性解压**均为真实实现**（无 `declare`）。`moon check --deny-warn`：0 error / 0 warning；
-> `moon test` **93/93**（另有 5 个 `#skip`）。
-> 依赖 `bobzhang/zip@0.1.2`（仅 `deflate`，已锁版；五门槛审计结论见 `docs/DECISIONS.md` §3）。真实 APK 样本与黄金差分已入库（见 `tests/ASSETS.md`；黄金期望值内嵌测试代码，`moon test` 即回归）。
-> **签名边界**：`verified == true` 仅表示结构 + 本地摘要一致，**不是**签名有效（无 RSA/ECDSA 验签；见 `docs/DECISIONS.md` §5）。
+把 APK（ZIP 容器）读成可信的条目索引与原始字节，供上层清单与代码解析消费。
 
-APK 容器层：只产出 `ManifestRef.raw` / `DexEntry.bytes` / `NativeLib.bytes` 等字节与索引，
-以及 apk 自有的 `ResTable` 值类型；由组合根决定是否交给 `axml` / `dex` 解析（见 `docs/DECISIONS.md` §1）。
+本包是独立发布单元。完整说明（能力边界、公开 API、依赖、验证、风险与未决）见本仓库 `README.md`；公开签名以 `pkg.generated.mbti` 为准。
 
-完整文档见项目根目录与 `docs/` 目录：`README.md`、`docs/DESIGN.md`、`docs/API.md`；设计决策记录见 `docs/DECISIONS.md`，测试资产清单见 `tests/ASSETS.md`。
+许可：Apache-2.0。
