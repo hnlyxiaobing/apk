@@ -129,11 +129,11 @@ F = 申报核心功能，S = 预期使用场景，C = 安全约束。「现状�
 | F4 | 多 dex + ABI 归类 + ELF 头交叉校验 | ✅ | 截断 | ✅ | readelf | ✅ | 合成覆盖 | 真实链路→W7 |
 | F5 | v1–v3.1 结构+摘要、恒不验签 | ✅ | 位翻转 | ✅ | apksigner | ✅ | SHA-256 覆盖 | v1 SHA-512→W4 |
 | F6 | arsc 完整展开（bag/三 offset） | ✅ | 截断 | ✅ | — | — | 已覆盖（冻结） | 一致性归外部组合层 |
-| F7 | ELF 侦察（needed/dynsym/JNI/Dart） | ✅ | 截断 | 合成 | readelf | ✅ | 合成覆盖 | 符号定位→W8 |
+| F7 | ELF 侦察（needed/dynsym/JNI/Dart） | ✅ | 截断 | 合成 | readelf | ✅ | 合成覆盖 | 符号定位→W8（已实现，M4） |
 | F8 | 10 类 ApkError、畸形不 panic | ✅ | §4.3 | ✅ | — | ✅ | 语料已有 | 扫描系统化 |
 | F9 | 批量完整性报告 | — | P6 | — | unzip | ✅ | 已实现（W1，2026-11-17） | — |
 | F10 | 证书结构事实 | — | DER 截断 | — | apksigner | ✅ | **已实现（W3，M3）** | — |
-| F11 | verity 结构 | — | 位翻转 | — | — | — | **未实现** | W5 |
+| F11 | verity 结构 | — | 位翻转 | — | — | — | **已实现（W5，M4）** | — |
 | F12 | 公钥验签（新通道） | — | 向量 | — | apksigner | — | **未实现** | W6 |
 | S1 | 逆向摸底：list --json → extract --entry | — | — | ✅ | — | **待建** | CLI 已有 | L4 场景化 |
 | S2 | 合规初筛：signatures/signature_checks 批量 | ✅ | 恒等式 | ✅ | apksigner | **待建** | API 已有 | L4 CI 形态 |
