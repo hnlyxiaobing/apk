@@ -35,9 +35,11 @@
 ## 3. 公开 API 索引（自动抽取 `pkg.generated.mbti` 的 `pub` 声明行；完整字段见快照）
 
 ```text
+pub fn parse_certificate(Bytes) -> CertificateInfo raise ApkError
 pub fn parse_resources_arsc(Bytes) -> ResTable raise ApkError
 pub(all) enum Abi {
 pub(all) struct Apk {
+pub fn Apk::certificate_infos(Self) -> Array[CertificateInfo] raise ApkError
 pub fn Apk::dex_files(Self) -> Array[DexEntry] raise ApkError
 pub fn Apk::entries(Self) -> Array[ZipEntryRef]
 pub fn Apk::entry(Self, String) -> Bytes raise ApkError
@@ -48,6 +50,7 @@ pub fn Apk::resource_table(Self) -> ResourceTableRef? raise ApkError
 pub fn Apk::resource_table_full(Self) -> ResTable? raise ApkError
 pub fn Apk::signature_checks(Self) -> Array[SignatureCheck] raise ApkError
 pub fn Apk::signatures(Self) -> Array[SignatureInfo] raise ApkError
+pub(all) struct CertificateInfo {
 pub(all) struct DexEntry {
 pub(all) enum ElfClass {
 pub(all) struct ElfInfo {
@@ -88,7 +91,7 @@ pub(all) struct ZipEntryRef {
 
 ## 5. 命令行与验证
 
-- `moon run cmd/main --target native -- list <apk> [--json]` / `extract <apk> --entry <name> --out <file>`；输出行 `ENTR|` `DEX|` `MANI|` `ARSC|` `LIB|`。
+- `moon run cmd/main --target native -- list <apk> [--json]` / `extract <apk> --entry <name> --out <file>` / `certs <apk> [--json]`；输出行 `ENTR|` `DEX|` `MANI|` `ARSC|` `LIB|` `CERT|`。
 - 复验：`moon clean` → `moon check --deny-warn` → `moon build` → `moon test` → `moon fmt --check` → `moon info` 后检查 `pkg.generated.mbti` 无意外 diff。
 - 本仓库为独立 Git 仓库，文档与 CI 均自包含，不依赖工作区其他目录。
 

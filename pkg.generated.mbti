@@ -6,6 +6,8 @@ import {
 }
 
 // Values
+pub fn parse_certificate(Bytes) -> CertificateInfo raise ApkError
+
 pub fn parse_resources_arsc(Bytes) -> ResTable raise ApkError
 
 // Errors
@@ -38,6 +40,7 @@ pub(all) struct Apk {
   entries : Array[ZipEntryRef]
   signing_block_off : UInt64?
 }
+pub fn Apk::certificate_infos(Self) -> Array[CertificateInfo] raise ApkError
 pub fn Apk::dex_files(Self) -> Array[DexEntry] raise ApkError
 pub fn Apk::entries(Self) -> Array[ZipEntryRef]
 pub fn Apk::entry(Self, String) -> Bytes raise ApkError
@@ -51,6 +54,19 @@ pub fn Apk::resource_table_full(Self) -> ResTable? raise ApkError
 pub fn Apk::signature_checks(Self) -> Array[SignatureCheck] raise ApkError
 pub fn Apk::signatures(Self) -> Array[SignatureInfo] raise ApkError
 pub impl ContainerIndex for Apk
+
+pub(all) struct CertificateInfo {
+  version : Int32
+  serial_hex : String
+  issuer : String
+  subject : String
+  not_before : String
+  not_after : String
+  signature_algo_oid : String
+  public_key_algo_oid : String
+  public_key_bits : Int32
+  sha256_fingerprint_hex : String
+}
 
 pub(all) struct DexEntry {
   name : String

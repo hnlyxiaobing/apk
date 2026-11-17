@@ -60,7 +60,7 @@ R  真实样本本地 runner    —— 工作区外样本 + SHA-256 门禁 + 显
 |---|---|---|---|---|
 | F-A 程序化构造 | 测试代码内字节 builder（`build_zip`/`ZSpec`、合成 ELF、手写 MANIFEST/.SF） | 是（代码） | 随本仓库 Apache-2.0 | 已有，W4/W5 扩展 |
 | F-B 受控文件 fixture | `tests/fixtures/*.apk` 等（自建或来源已核实） | 是 | 登记于 `tests/ASSETS.md`（**现状缺失**，开发文档 W9 建立） | 已有 6 件 |
-| F-C 生成器资产 | `tests/fixtures/gen_elf_fixtures.py` 产出的确定性 ELF/APK（W7 轨 A） | 是（生成物+脚本） | 自产，Apache-2.0 | 待建 |
+| F-C 生成器资产 | `tests/fixtures/gen_elf_fixtures.py` 产出的确定性 ELF/APK（W7 轨 A） | 是（生成物+脚本） | 自产，Apache-2.0 | 已建（W7 轨A） |
 | F-D 真实第三方样本 | 工作区外本地路径 | **否（红线）** | 许可不明，只本地差分 | R runner 承载 |
 
 **红线**：F-D 永不入库；F-B 新增件必须先核来源再登记哈希；任何 fixture 的 SHA-256 变更须同步 `tests/ASSETS.md`（W9 建立后生效），黄金记录与哈希绑定（防「样本漂移假绿」）。
@@ -132,7 +132,7 @@ F = 申报核心功能，S = 预期使用场景，C = 安全约束。「现状�
 | F7 | ELF 侦察（needed/dynsym/JNI/Dart） | ✅ | 截断 | 合成 | readelf | ✅ | 合成覆盖 | 符号定位→W8 |
 | F8 | 10 类 ApkError、畸形不 panic | ✅ | §4.3 | ✅ | — | ✅ | 语料已有 | 扫描系统化 |
 | F9 | 批量完整性报告 | — | P6 | — | unzip | ✅ | 已实现（W1，2026-11-17） | — |
-| F10 | 证书结构事实 | — | DER 截断 | — | apksigner | ✅ | **未实现** | W3 |
+| F10 | 证书结构事实 | — | DER 截断 | — | apksigner | ✅ | **已实现（W3，M3）** | — |
 | F11 | verity 结构 | — | 位翻转 | — | — | — | **未实现** | W5 |
 | F12 | 公钥验签（新通道） | — | 向量 | — | apksigner | — | **未实现** | W6 |
 | S1 | 逆向摸底：list --json → extract --entry | — | — | ✅ | — | **待建** | CLI 已有 | L4 场景化 |
@@ -154,7 +154,7 @@ F = 申报核心功能，S = 预期使用场景，C = 安全约束。「现状�
 | BadCentralDirectory | 坏 local 签名/尺寸/CRC/压缩方法（既有） | W2 伪造声明、W1 双通道 |
 | Zip64Unsupported | ZIP64 标记（既有） | — |
 | EntryNotFound | 不存在名（既有） | — |
-| BadSigningBlock | 坏签名块长度前缀（既有） | W3 畸形 DER、W5 坏 verity |
+| BadSigningBlock | 坏签名块长度前缀（既有） | W3 畸形 DER（已由 cert_test T-W3-2 覆盖）、W5 坏 verity |
 | UnsupportedSignatureScheme | 未知方案 ID（既有） | — |
 | BadAlignment | 未对齐声明（既有） | — |
 | BadResourceTable | 坏 arsc chunk（既有） | — |

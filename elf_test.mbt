@@ -194,11 +194,12 @@ test "golden apk synthetic ELF ABI" {
 
 ///|
 /// 真实第三方 .so 的解析侧 ABI 黄金差分：仍未执行。
-/// 既有内嵌样本均无 .so（open-questions §2.1 缺口 4）；本文件用合成 ELF 补齐
-/// 解析侧结构路径，但**不能替代**真实 `.so` 差分。`#skip` 显式标注，绝不冒充通过。
+/// 既有内嵌样本均无 .so（open-questions §2.1 缺口 4）；解析侧**结构链路**已由
+/// 轨 A（`w7_test.mbt`，确定性合成 ELF fixture 全链路黄金）与合成 ELF 用例补齐，
+/// 但**不能替代**真实 `.so` 差分。`#skip` 显式标注，绝不冒充通过。
 #skip
 test "native_libs real third-party .so differential [SKIPPED: 真实 .so 未入库]" {
   println(
-    "SKIPPED: 真实第三方 .so 样本许可不明/未入库；合成 ELF fixture 仅覆盖结构路径，真实差分 [仍需实测]",
+    "SKIPPED: 真实第三方 .so 样本许可不明/未入库；轨 A 合成 ELF fixture 已覆盖结构链路（needed/jni/dart_markers），真实差分 [仍需实测，见 tests/local_real_diff.py 轨 B]",
   )
 }

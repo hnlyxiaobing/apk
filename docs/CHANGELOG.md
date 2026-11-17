@@ -63,11 +63,32 @@
 
 `moon check --deny-warn` / `moon build` / `moon test`（109/109，含 6 个新增 W2 用例 + 1 个限额常量回归）/ `moon fmt --check` / `moon info` + mbti **纯加法 diff**（1 行纯增），全绿。
 
+## 2026-11-17 — M3 工作包（W3 证书解析 + W7 黄金差分）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-17 |
+| 工作包 | W3 X.509 证书结构解析 + W7 真实 `.so` 许可安全的黄金差分 |
+| 新增 pub 声明 | `pub(all) struct CertificateInfo` + `pub fn parse_certificate(Bytes) -> CertificateInfo raise ApkError` + `pub fn Apk::certificate_infos(Self) -> Array[CertificateInfo] raise ApkError` |
+| 快照 diff 结论 | **纯加法**：mbti 新增 1 struct + 2 fn（共 16 行纯增），零 modify/delete |
+| 测试增量 | `cert_test.mbt`：T-W3-4 字段稳定性 / T-W3-2 畸形 DER 只 raise 不 panic / T-W3-3 v1 与 v2/v3 双通道去重；`w7_test.mbt`：T-W7-2 全链路黄金 + 便利函数通道；`gen_elf_fixtures.py` 确定性合成 ELF/APK |
+
+### 本次合入内容
+
+- **W3 能力**（`cert.mbt`）：X.509 证书结构解析——读取版本 / 序列号（hex）/ 颁发者与主体（RFC4514 CN/O/OU/C/ST/L）/ 有效期（UTCTime 2 位年份 ≥50→19xx、<50→20xx，输出 `YYYY-MM-DDTHH:MM:SSZ`）/ 签名与公钥算法 OID（点分十进制）/ 公钥位长（RSA 模数位长或 EC P-256/384/521 OID 映射）/ SHA-256 指纹（hex）。`Apk::certificate_infos` 遍历 `signatures()` 各方案的 `certificates`（v1 PKCS#7 与 v2/v3 signer certificates）按 DER 字节去重。畸形 DER 一律走既有 `ApkError::BadSigningBlock`，不新增错误变体。
+- **W7 轨 A**（`gen_elf_fixtures.py` + `w7_test.mbt`）：手工字节构造结构完整的 ELF64/AArch64 动态库（ELF 头 + PT_DYNAMIC + DT_NEEDED/DT_HASH/DT_STRTAB/DT_SYMTAB + `Java_*` / `_kDart*` marker），确定性可复现；经程序化 ZIP 打入 `lib/arm64-v8a/`。测试做容器归类 → ELF 头交叉校验 → needed / jni_exports / dart_markers 的全链路黄金断言。哈希登记 `tests/ASSETS.md`。
+- **W7 轨 B**（`tests/local_real_diff.py`，本地-only）：以 `llvm-readelf -d --dyn-symbols` 为 oracle 的真实 `.so` 差分脚本，SHA-256 门禁 + 退出码 78；**永不入仓库测试集**（样本许可红线），真实第三方样本只允许「工作区外本地路径 + 本表登记 + `#skip`」形态。
+- **CLI**（`cmd/main/main.mbt`）：新增 `certs <apk> [--json]` 子命令（JSON + `CERT|` 记录行）；usage 文本同步更新。
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（120/120，含 11 个新增 M3 用例）/ `moon fmt --check` / `moon info` + mbti **纯加法 diff**（16 行纯增），全绿。
+
 ## 后续（预留登记位）
 
 - W1 批量完整性报告 —— 已完成（M1）
 - W2 内存防线 —— 已完成（M2）
 - W4 v1 SHA-512 —— 已完成（M2）
-- W3 证书解析 + W7 黄金差分（待 M3）
+- W3 证书解析 + W7 黄金差分 —— 已完成（M3）
 - W5 verity + W8 Dart 符号定位（待 M4）
 - W6 公钥验签（待裁决后另排）

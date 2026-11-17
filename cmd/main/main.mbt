@@ -22,6 +22,8 @@ fn usage_text() -> String {
     "      提取全部条目到目录（保留条目内路径，自动建子目录；",
     "      绝对路径 / .. / 反斜杠 / 盘符等不安全条目名一律拒绝，退出码 1；",
     "      单个条目解压后大小上限 256 MiB，超出退出码 1）",
+    "  \{tool_name} certs <apk> [--json]",
+    "      列出 APK 内全部证书结构事实（W3：主体/颁发者/有效期/指纹；不验签）",
     "  \{tool_name} --help",
     "",
     "输出: 默认人类可读记录行（规范化口径见 tests/ASSETS.md）；",
@@ -394,10 +396,83 @@ async fn cmd_extract(rest : ArrayView[String]) -> Int32 {
 }
 
 ///|
+/// `certs` 子命令（W3）：列出 APK 内全部证书结构事实。
+async fn cmd_certs(rest : ArrayView[String]) -> Int32 {
+  let mut apk_path = ""
+  let mut json = false
+  for xs = rest {
+    match xs {
+      ["--json", .. r] => {
+        json = true
+        continue r
+      }
+      ["--help", ..] => {
+        println(usage_text())
+        return 0
+      }
+      ["-h", ..] => {
+        println(usage_text())
+        return 0
+      }
+      [p, .. r] => {
+        if p.has_prefix("-") {
+          eprintln("error: 未知选项：\{p}")
+          eprintln("用法: \{tool_name} certs <apk> [--json]")
+          return 2
+        }
+        if apk_path != "" {
+          eprintln("error: 多余的位置参数：\{p}")
+          return 2
+        }
+        apk_path = p
+        continue r
+      }
+      [] => break
+    }
+  }
+  if apk_path == "" {
+    eprintln("error: certs 需要 <apk> 参数")
+    eprintln("用法: \{tool_name} certs <apk> [--json]")
+    return 2
+  }
+  let (data, ok) = read_input(apk_path)
+  if !ok {
+    return 1
+  }
+  let a = @apk.Apk::open(data)
+  let certs = a.certificate_infos()
+  if json {
+    let parts : Array[String] = []
+    parts.push(
+      "{\"tool\":\"\{tool_name}\",\"apk\":\{json_escape(apk_path)},\"certificates\":[",
+    )
+    let mut first = true
+    for c in certs {
+      if !first {
+        parts.push(",")
+      }
+      first = false
+      parts.push(
+        "{\"subject\":\{json_escape(c.subject)},\"issuer\":\{json_escape(c.issuer)},\"not_before\":\{json_escape(c.not_before)},\"not_after\":\{json_escape(c.not_after)},\"public_key_algo_oid\":\{json_escape(c.public_key_algo_oid)},\"public_key_bits\":\{c.public_key_bits},\"sha256_fingerprint_hex\":\{json_escape(c.sha256_fingerprint_hex)}}",
+      )
+    }
+    parts.push("]}")
+    println(str_join(parts))
+  } else {
+    for c in certs {
+      println(
+        "CERT|\{c.subject}|\{c.issuer}|\{c.not_after}|\{c.sha256_fingerprint_hex}",
+      )
+    }
+  }
+  0
+}
+
+///|
 /// 运行入口：返回进程退出码；库抛出的解析错误统一按“解析错误”返回 1。
 async fn run(args : Array[String]) -> Int32 {
   if args.length() <= 1 {
-    eprintln("error: 缺少子命令（list / extract）")
+    eprintln("error: 缺少子命令（list / extract / certs）")
     eprintln("运行 \{tool_name} --help 查看用法")
     return 2
   }
@@ -412,6 +487,13 @@ async fn run(args : Array[String]) -> Int32 {
     }
   } else if sub == "extract" {
     cmd_extract(rest) catch {
+      e => {
+        eprintln("error: \{e}")
+        1
+      }
+    }
+  } else if sub == "certs" {
+    cmd_certs(rest) catch {
       e => {
         eprintln("error: \{e}")
         1
