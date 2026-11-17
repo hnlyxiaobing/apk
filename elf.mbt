@@ -657,3 +657,195 @@ pub fn NativeLib::jni_exports(self : NativeLib) -> Array[String] raise ApkError 
   let info = self.elf_info()
   info.jni_exports
 }
+
+///|
+/// Dart 快照引用的符号定位（W8 — 仅识别，不做快照语义）。
+///
+/// 把 `dart_markers` 的「字节模式命中」升级为「marker 符号在动态符号表中的偏移与节名」，
+/// 为外部 Dart 快照解析器提供字节偏移。**绝不进入快照语义**（对象图 / 指令表 / 版本语义
+/// 一律不做，与 `elf.mbt` 既有上限一致）。
+///
+/// 只匹配既有 4 个 `_kDart*` 预设 marker 名（`elf_dart_marker_names` 前 4 项）；
+/// 未定义符号（st_shndx == 0）跳过；无节头表（被 strip）时 `in_section` 为空串。
+pub(all) struct DartSnapshotRef {
+  /// marker 名，如 "_kDartIsolateSnapshotData"。
+  marker : String
+  /// 符号 st_value（文件内虚拟地址口径，文档注明）。
+  offset : UInt64
+  /// 所在节名（.rodata / .text 等）；无法判定（无节头表 / 偏移未落段）时为空串。
+  in_section : String
+}
+
+///|
+/// 返回 Dart 快照引用的符号定位数组；无命中返回空。
+///
+/// 只解析 `_kDart*` 开头的 4 个预设 marker；marker 命中但为未定义符号（st_shndx==0）时
+/// 跳过不产出；按 marker 预设顺序输出（不对应 dynsym 顺序）。
+pub fn NativeLib::dart_snapshot_refs(
+  self : NativeLib,
+) -> Array[DartSnapshotRef] raise ApkError {
+  let b = self.bytes
+  let layout = elf_parse_header(b)
+  let dy = elf_parse_dynamic(b, layout)
+  let strtab_vaddr = match dy.strtab {
+    Some(v) => v
+    None => raise ApkError::BadElf(0, "missing DT_STRTAB")
+  }
+  let str_off = elf_vaddr_to_off(b, layout.segments, strtab_vaddr)
+  let symtab_vaddr = match dy.symtab {
+    Some(v) => v
+    None => raise ApkError::BadElf(0, "missing DT_SYMTAB")
+  }
+  let sym_off = elf_vaddr_to_off(b, layout.segments, symtab_vaddr)
+  let syment = match dy.syment {
+    Some(v) => {
+      guard v > 0UL && v <= 64UL else {
+        raise ApkError::BadElf(sym_off, "invalid DT_SYMENT value")
+      }
+      v.to_int()
+    }
+    None => if layout.is64 { 24 } else { 16 }
+  }
+  let count = elf_dynsym_count(b, layout, dy, sym_off, str_off, syment)
+  // 解析 section headers（用于 in_section）
+  let sections = elf_parse_sections(b, layout)
+  let out : Array[DartSnapshotRef] = []
+  let marker_names = elf_dart_marker_names
+  let dart_count = if marker_names.length() > 4 {
+    4
+  } else {
+    marker_names.length()
+  }
+  // 预收集命中集合（仅前 4 个 _kDart* marker）
+  for mi = 0; mi < dart_count; mi = mi + 1 {
+    let mname = marker_names[mi]
+    for i = 0; i < count; i = i + 1 {
+      let so = sym_off + i * syment
+      guard so >= 0 && so + syment <= b.length() else {
+        raise ApkError::BadElf(
+          elf_clamp(b, so),
+          "dynamic symbol table entry out of bounds",
+        )
+      }
+      let st_name = elf_r32(b, so, layout.little)
+      let shndx_off = if layout.is64 { so + 6 } else { so + 14 }
+      let st_shndx = elf_r16(b, shndx_off, layout.little)
+      if st_shndx == 0 {
+        continue
+      }
+      let str_abs = str_off.to_uint64() + st_name.to_uint64()
+      if str_abs >= b.length().to_uint64() {
+        continue
+      }
+      match elf_cstring(b, str_abs.to_int()) {
+        Some(name) =>
+          if name == mname {
+            let st_val = if layout.is64 {
+              elf_r64(b, so + 8, layout.little)
+            } else {
+              elf_r32(b, so + 4, layout.little).to_uint64()
+            }
+            let sec = section_name_for_addr(sections, st_val)
+            out.push({ marker: mname, offset: st_val, in_section: sec, })
+          }
+        None => ()
+      }
+    }
+  }
+  out
+}
+
+///|
+/// 解析后的 section header（内部）。
+priv struct ElfSection {
+  name : String
+  addr : UInt64
+  size : UInt64
+}
+
+///|
+/// 解析 section header table（含 shstrtab 中的节名）。
+/// 无节头表（被 strip 或 e_shoff==0）返回空数组。
+fn elf_parse_sections(b : Bytes, layout : ElfLayout) -> Array[ElfSection] {
+  let out : Array[ElfSection] = []
+  let len = b.length()
+  let is64 = layout.is64
+  let shoff_off = if is64 { 40 } else { 32 }
+  let shentsize_off = if is64 { 58 } else { 46 }
+  let shnum_off = if is64 { 60 } else { 48 }
+  let shstrndx_off = if is64 { 62 } else { 50 }
+  let ehsize = if is64 { 64 } else { 52 }
+  if len < ehsize {
+    return out
+  }
+  let shoff = elf_addr(b, shoff_off, is64, layout.little) catch {
+    _ => return out
+  }
+  if shoff == 0UL {
+    return out
+  }
+  let shentsize = elf_r16(b, shentsize_off, layout.little) catch {
+    _ => return out
+  }
+  let shnum = elf_r16(b, shnum_off, layout.little) catch { _ => return out }
+  let shstrndx = elf_r16(b, shstrndx_off, layout.little) catch {
+    _ => return out
+  }
+  guard shnum > 0 && shnum <= 65535 else { return out }
+  let shentsize64 = shentsize.to_uint64()
+  let table_end64 = shoff + shnum.to_uint64() * shentsize64
+  guard table_end64 <= len.to_uint64() else { return out }
+  let shoff_i = elf_off_of(b, shoff) catch { _ => return out }
+  // 第一遍：收集 section header 原始数据 (addr, size, name_off)
+  let sections_raw : Array[(UInt64, UInt64, Int32)] = []
+  for i = 0; i < shnum; i = i + 1 {
+    let p = shoff_i + i * shentsize
+    let name_off = elf_r32(b, p, layout.little).reinterpret_as_int() catch {
+      _ => return out
+    }
+    let addr_off = if is64 { p + 16 } else { p + 12 }
+    let addrv = elf_addr(b, addr_off, is64, layout.little) catch {
+      _ => return out
+    }
+    let size_off = if is64 { p + 32 } else { p + 20 }
+    let sizev = elf_addr(b, size_off, is64, layout.little) catch {
+      _ => return out
+    }
+    sections_raw.push((addrv, sizev, name_off))
+  }
+  // 第二遍：从 shstrtab 读节名
+  if shstrndx < shnum {
+    let tup = sections_raw[shstrndx]
+    let sh_addr = tup.0
+    let shstrtab_off = elf_vaddr_to_off(b, layout.segments, sh_addr) catch {
+      _ => return out
+    }
+    for raw in sections_raw {
+      let addr = raw.0
+      let size = raw.1
+      let name_off = raw.2
+      let name_abs = shstrtab_off.to_uint64() + name_off.to_uint64()
+      let sec_name = if name_abs < b.length().to_uint64() {
+        match elf_cstring(b, name_abs.to_int()) {
+          Some(n) => n
+          None => ""
+        }
+      } else {
+        ""
+      }
+      out.push({ name: sec_name, addr, size, })
+    }
+  }
+  out
+}
+
+///|
+/// 给定虚拟地址，返回所在节名；未命中返回空串。
+fn section_name_for_addr(sections : Array[ElfSection], addr : UInt64) -> String {
+  for s in sections {
+    if addr >= s.addr && addr - s.addr < s.size {
+      return s.name
+    }
+  }
+  ""
+}

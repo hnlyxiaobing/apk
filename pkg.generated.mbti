@@ -53,6 +53,7 @@ pub fn Apk::resource_table(Self) -> ResourceTableRef? raise ApkError
 pub fn Apk::resource_table_full(Self) -> ResTable? raise ApkError
 pub fn Apk::signature_checks(Self) -> Array[SignatureCheck] raise ApkError
 pub fn Apk::signatures(Self) -> Array[SignatureInfo] raise ApkError
+pub fn Apk::verity(Self) -> VerityInfo? raise ApkError
 pub impl ContainerIndex for Apk
 
 pub(all) struct CertificateInfo {
@@ -66,6 +67,12 @@ pub(all) struct CertificateInfo {
   public_key_algo_oid : String
   public_key_bits : Int32
   sha256_fingerprint_hex : String
+}
+
+pub(all) struct DartSnapshotRef {
+  marker : String
+  offset : UInt64
+  in_section : String
 }
 
 pub(all) struct DexEntry {
@@ -113,6 +120,7 @@ pub(all) struct NativeLib {
   path : String
   bytes : Bytes
 }
+pub fn NativeLib::dart_snapshot_refs(Self) -> Array[DartSnapshotRef] raise ApkError
 pub fn NativeLib::elf_abi(Self) -> Abi raise ApkError
 pub fn NativeLib::elf_info(Self) -> ElfInfo raise ApkError
 pub fn NativeLib::jni_exports(Self) -> Array[String] raise ApkError
@@ -265,6 +273,19 @@ pub(all) enum SignatureScheme {
   V3
   V31
 }
+
+#derive(@debug.Debug)
+pub(all) struct VerityInfo {
+  block_id : UInt32
+  version : Int32
+  hash_algorithm : String
+  block_size : Int32
+  salt_hex : String
+  root_hash_hex : String
+  tree_size : UInt64
+  tree_recomputed_ok : Bool
+}
+pub fn VerityInfo::to_repr(Self) -> @debug.Repr
 
 pub(all) struct ZipEntryRef {
   name : String

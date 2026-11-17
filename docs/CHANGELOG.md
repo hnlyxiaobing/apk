@@ -84,11 +84,31 @@
 
 `moon check --deny-warn` / `moon build` / `moon test`（120/120，含 11 个新增 M3 用例）/ `moon fmt --check` / `moon info` + mbti **纯加法 diff**（16 行纯增），全绿。
 
+## 2026-11-17 — M4 工作包（W5 verity + W8 Dart 符号定位）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-17 |
+| 工作包 | W5 verity 签名块结构解析 + W8 Dart 符号定位（仅识别） |
+| 新增 pub 声明 | `pub(all) struct VerityInfo` + `pub fn Apk::verity(Self) -> VerityInfo? raise ApkError` + `pub(all) struct DartSnapshotRef` + `pub fn NativeLib::dart_snapshot_refs(Self) -> Array[DartSnapshotRef] raise ApkError` |
+| 快照 diff 结论 | **纯加法**：mbti 新增 2 struct + 2 fn + 1 extend（共 24 行纯增），零 modify/delete |
+| 测试增量 | `verity_test.mbt`：T-W5-1 无块→None / T-W5-4a/b 块识别+字段解析；`w8_test.mbt`：T-W8-1 W7 fixture 偏移对账 / T-W8-2 strip 不 panic / T-W8-3 无符号空数组（共 9 个用例） |
+
+### 本次合入内容
+
+- **W5 能力**（`verity.mbt`）：识别 APK Signing Block 中 ID `0x42726577` 的 verity 对齐块并尽力解析声明字段（version / hash_algorithm / block_size / salt / root_hash / tree_size）；树重算恒不执行（`tree_recomputed_ok` 恒 false），`#skip` 显式缺口（需 AOSP fs-verity Merkle 树布局核实后补）。
+- **W8 能力**（`elf.mbt` §DartSnapshotRef）：把 `dart_markers` 的字节模式命中升级为符号定位——从 dynsym 读 st_value 偏移，从 section header table 判定节名（.rodata / .text 等）；无节头表（被 strip）时 `in_section` 为空串；只匹配 4 个 `_kDart*` 预设 marker；不做快照语义。
+- **加法性 API**：不新增 `ApkError` 变体、不动旧字段；纯新增 struct + fn 落地。
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（129/129，含 9 个新增 M4 用例）/ `moon fmt --check` / `moon info` + mbti **纯加法 diff**（24 行纯增），全绿。
+
 ## 后续（预留登记位）
 
 - W1 批量完整性报告 —— 已完成（M1）
 - W2 内存防线 —— 已完成（M2）
 - W4 v1 SHA-512 —— 已完成（M2）
 - W3 证书解析 + W7 黄金差分 —— 已完成（M3）
-- W5 verity + W8 Dart 符号定位（待 M4）
+- W5 verity + W8 Dart 符号定位 —— 已完成（M4）
 - W6 公钥验签（待裁决后另排）
