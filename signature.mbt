@@ -3,7 +3,7 @@
 ///
 /// 边界（硬性）：
 /// - 本模块能做：解析签名块结构、解析 v1 JAR 的 `MANIFEST.MF` / `.SF` / PKCS#7 封装、
-///   校验 v1 条目摘要与清单摘要、校验 v2/v3/v3.1 的 APK 内容分块摘要（SHA-256）。
+///   校验 v1 条目摘要与清单摘要（SHA-256 / SHA-512）、校验 v2/v3/v3.1 的 APK 内容分块摘要（SHA-256）。
 /// - 本模块**不能做**：RSA / ECDSA / DSA 公钥验签（MoonBit 无密码学 stdlib，本库也未
 ///   实现大数公钥运算）。因此 `verified == true` 的语义是「结构合法且摘要一致」，
 ///   **不等于签名有效**；`SignatureCheck.signature_verified` 恒为 `false`。
@@ -241,6 +241,7 @@ fn Apk::verify_v1(self : Apk, rec : SigRecord) -> SignatureCheck {
   let mut entries_failed = 0
   let mut unsupported = 0
   let mut algorithm = ""
+  let mut mixed = false
   for section in sections {
     match attr_value(section, "Name") {
       None => ()
@@ -248,16 +249,26 @@ fn Apk::verify_v1(self : Apk, rec : SigRecord) -> SignatureCheck {
         match entry_digest_attr(section) {
           None => ()
           Some((alg, expected_b64)) => {
-            algorithm = alg
-            if alg == "SHA-256" {
+            if algorithm == "" {
+              algorithm = alg
+            } else if algorithm != alg {
+              mixed = true
+            }
+            if alg == "SHA-256" || alg == "SHA-512" {
               match self.safe_entry(name) {
-                Some(data) =>
-                  if digest_matches(sha256(data), expected_b64) {
+                Some(data) => {
+                  let actual = if alg == "SHA-256" {
+                    sha256(data)
+                  } else {
+                    sha512(data)
+                  }
+                  if digest_matches(actual, expected_b64) {
                     entries_checked = entries_checked + 1
                   } else {
                     entries_checked = entries_checked + 1
                     entries_failed = entries_failed + 1
                   }
+                }
                 None => {
                   entries_checked = entries_checked + 1
                   entries_failed = entries_failed + 1
@@ -270,26 +281,35 @@ fn Apk::verify_v1(self : Apk, rec : SigRecord) -> SignatureCheck {
         }
     }
   }
-  // `.SF` 对整份 MANIFEST.MF 的摘要。
+  // `.SF` 对整份 MANIFEST.MF 的摘要（同时检查 SHA-256 与 SHA-512）。
   let sf_sections = parse_manifest_sections(sf_text)
-  let manifest_digest_attr = if sf_sections.length() > 0 {
-    attr_value(sf_sections[0], "SHA-256-Digest-Manifest")
-  } else {
-    None
-  }
   let mut manifest_ok = false
-  match manifest_digest_attr {
-    Some(expected) => manifest_ok = digest_matches(sha256(mf_bytes), expected)
-    None => ()
+  if sf_sections.length() > 0 {
+    match attr_value(sf_sections[0], "SHA-256-Digest-Manifest") {
+      Some(expected) => manifest_ok = digest_matches(sha256(mf_bytes), expected)
+      None => ()
+    }
+    if !manifest_ok {
+      match attr_value(sf_sections[0], "SHA-512-Digest-Manifest") {
+        Some(expected) =>
+          manifest_ok = digest_matches(sha512(mf_bytes), expected)
+        None => ()
+      }
+    }
   }
   let digest_ok = manifest_ok &&
     entries_checked > 0 &&
     entries_failed == 0 &&
     unsupported == 0
   let detail = if digest_ok {
-    "v1 digests verified (" +
-    entries_checked.to_string() +
-    " entries + MANIFEST.MF); signature NOT verified"
+    let base = "v1 digests verified (" +
+      entries_checked.to_string() +
+      " entries + MANIFEST.MF); signature NOT verified"
+    if mixed {
+      base + " (mixed algorithms)"
+    } else {
+      base
+    }
   } else if !manifest_ok {
     "v1 MANIFEST.MF digest mismatch or unavailable; signature NOT verified"
   } else if entries_failed > 0 {
@@ -297,9 +317,14 @@ fn Apk::verify_v1(self : Apk, rec : SigRecord) -> SignatureCheck {
     entries_failed.to_string() +
     "; signature NOT verified"
   } else if unsupported > 0 {
-    "v1 digest algorithm unsupported x" +
-    unsupported.to_string() +
-    "; signature NOT verified"
+    let base = "v1 digest algorithm unsupported x" +
+      unsupported.to_string() +
+      "; signature NOT verified"
+    if mixed {
+      base + " (mixed algorithms)"
+    } else {
+      base
+    }
   } else {
     "v1 MANIFEST.MF has no verifiable entry digests; signature NOT verified"
   }

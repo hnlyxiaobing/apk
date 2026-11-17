@@ -167,3 +167,156 @@ test "synthetic v1 missing SF degrades to structure_ok=false" {
   assert_true(!c.digest_ok)
   assert_true(!apk.signatures()[0].verified)
 }
+
+///|
+/// ---------- W4 v1 SHA-512 摘要支持 ----------
+/// T-W4-1：纯 SHA-512（MANIFEST 条目 + .SF 清单摘要均用 SHA-512）。
+/// T-W4-2：SHA-256 与 SHA-512 混合 MANIFEST → digest_ok=true 且 detail 含 "mixed"。
+/// T-W4-3：SHA-1 条目 → unsupported++，fail-closed。
+/// T-W4-4：`entry_digest_attr` 对仅有 SHA-512-Digest 的 section 返回 ("SHA-512", ...)。
+
+///|
+/// 纯 SHA-512 MANIFEST（SHA-512("hello") 的 base64）。
+fn s_manifest_sha512() -> Bytes {
+  @encoding/utf8.encode(
+    "Manifest-Version: 1.0\n\nName: a.txt\nSHA-512-Digest: m3HSJL1i83hdltRq0+o9czGb+8KJDKra4t/3JRlnPKcjI8PZm6XBHXx6zG4UuMXaDEZjR1wuXDre9G9zvN7AQw==\n\n",
+  )
+}
+
+///|
+/// .SF：SHA-512-Digest-Manifest = SHA-512(Manifest-Version: 1.0\n\nName:...==\n\n)。
+fn s_sf_sha512() -> Bytes {
+  @encoding/utf8.encode(
+    "Signature-Version: 1.0\nSHA-512-Digest-Manifest: 4alQAH9yPIuNA2VeBL8T+kauZS7g6T+5GiMbxohnq3rloqSxIlUU351DHl+h8rdCiYX70xwZnJUBtnbEEpV/+w==\n\n",
+  )
+}
+
+///|
+/// 混合 MANIFEST：a.txt 用 SHA-256，b.txt 用 SHA-512（同含 "hello"）。
+fn s_manifest_mixed() -> Bytes {
+  @encoding/utf8.encode(
+    "Manifest-Version: 1.0\n\nName: a.txt\nSHA-256-Digest: LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=\n\nName: b.txt\nSHA-512-Digest: m3HSJL1i83hdltRq0+o9czGb+8KJDKra4t/3JRlnPKcjI8PZm6XBHXx6zG4UuMXaDEZjR1wuXDre9G9zvN7AQw==\n\n",
+  )
+}
+
+///|
+/// 混合 .SF：同时包含 SHA-256-Digest-Manifest 与 SHA-512-Digest-Manifest。
+fn s_sf_mixed() -> Bytes {
+  @encoding/utf8.encode(
+    "Signature-Version: 1.0\nSHA-256-Digest-Manifest: K8LPlmqQIfgyvo/ChFT6sP5TllIe8P2EYKTYxXtxmiU=\nSHA-512-Digest-Manifest: rh2yRBnK2GtRaNrvT7kfPFjviynCg0IdbHiSx3gvLzBfGyG74rvcCGJVqd0x7ZBlceUzwuvyUb3OOQlOj0DNTQ==\n\n",
+  )
+}
+
+///|
+/// 构造混合 v1 APK（两条目：a.txt + b.txt + META-INF）。
+fn s_v1_mixed_apk(
+  entry_a : Bytes,
+  entry_b : Bytes,
+  manifest : Bytes,
+  sf : Bytes,
+  block : Bytes,
+) -> Bytes {
+  build_zip(
+    [
+      zspec("a.txt", entry_a),
+      zspec("b.txt", entry_b),
+      zspec("META-INF/MANIFEST.MF", manifest),
+      zspec("META-INF/TEST.SF", sf),
+      zspec("META-INF/TEST.RSA", block),
+    ],
+    None,
+  )
+}
+
+///|
+/// T-W4-1：纯 SHA-512 v1 签名 → digest_ok=true。
+test "W4 T-W4-1 pure SHA-512 v1 signature verifies digests" {
+  let apk = @apk.Apk::open(
+    s_v1_apk(b"hello", s_manifest_sha512(), s_sf_sha512(), s_pkcs7(b"cert")),
+  )
+  let c = apk.signature_checks()[0]
+  assert_true(c.structure_ok)
+  assert_true(c.digest_ok, msg=c.detail)
+  assert_eq(c.entries_checked, 1)
+  assert_eq(c.entries_failed, 0)
+  assert_eq(c.digest_algorithm, "SHA-512")
+  assert_true(!c.signature_verified)
+}
+
+///|
+/// T-W4-2：混合 SHA-256 + SHA-512 v1 → digest_ok=true，detail 含 "(mixed algorithms)"。
+test "W4 T-W4-2 mixed SHA-256 and SHA-512 v1 signature verifies with mixed note" {
+  let apk = @apk.Apk::open(
+    s_v1_mixed_apk(
+      b"hello",
+      b"hello",
+      s_manifest_mixed(),
+      s_sf_mixed(),
+      s_pkcs7(b"cert"),
+    ),
+  )
+  let c = apk.signature_checks()[0]
+  assert_true(c.structure_ok)
+  assert_true(c.digest_ok, msg=c.detail)
+  assert_eq(c.entries_checked, 2)
+  assert_eq(c.entries_failed, 0)
+  assert_eq(c.digest_algorithm, "SHA-256")
+  assert_true(
+    c.detail.contains("mixed"),
+    msg="expected mixed note: " + c.detail,
+  )
+  assert_true(!c.signature_verified)
+}
+
+///|
+/// T-W4-3 .SF：SHA-256-Digest-Manifest = SHA-256(SHA-1-only manifest)。
+fn s_sf_sha1_mf() -> Bytes {
+  @encoding/utf8.encode(
+    "Signature-Version: 1.0\nSHA-256-Digest-Manifest: Af77eMM8tiiPN0p+IFQD4QD2NDZJmeLKgqeE7X16HEM=\n\n",
+  )
+}
+
+///|
+/// T-W4-3：SHA-1 条目 → unsupported，fail-closed（digest_ok=false）。
+test "W4 T-W4-3 SHA-1 entry is unsupported fail-closed" {
+  let mf_sha1 = @encoding/utf8.encode(
+    "Manifest-Version: 1.0\n\nName: a.txt\nSHA-1-Digest: qvTGHdzF6KLavt4PO0gs2a6pQ00=\n\n",
+  )
+  let apk = @apk.Apk::open(
+    s_v1_apk(b"hello", mf_sha1, s_sf_sha1_mf(), s_pkcs7(b"cert")),
+  )
+  let c = apk.signature_checks()[0]
+  assert_true(c.structure_ok)
+  assert_true(!c.digest_ok)
+  assert_true(c.detail.contains("unsupported"))
+}
+
+///|
+/// T-W4-4 .SF：SHA-512-Digest-Manifest = SHA-512(two-entry pure-SHA-512 manifest)。
+fn s_sf_sha512_two() -> Bytes {
+  @encoding/utf8.encode(
+    "Signature-Version: 1.0\nSHA-512-Digest-Manifest: asdMCdf05jhtxOUNsBManw6S6dnGZuqAYFjre2HUoqtYJwQw16t855LV4nYgYDvEyuheO0ER6xlKzIosziSbVQ==\n\n",
+  )
+}
+
+///|
+/// T-W4-4：双条目均用 SHA-512（不同姓名）→ digest_ok=true，digest_algorithm="SHA-512"。
+test "W4 T-W4-4 two-entry pure SHA-512 v1 both ok" {
+  let mf_two = @encoding/utf8.encode(
+    "Manifest-Version: 1.0\n\nName: a.txt\nSHA-512-Digest: m3HSJL1i83hdltRq0+o9czGb+8KJDKra4t/3JRlnPKcjI8PZm6XBHXx6zG4UuMXaDEZjR1wuXDre9G9zvN7AQw==\n\nName: b.txt\nSHA-512-Digest: m3HSJL1i83hdltRq0+o9czGb+8KJDKra4t/3JRlnPKcjI8PZm6XBHXx6zG4UuMXaDEZjR1wuXDre9G9zvN7AQw==\n\n",
+  )
+  let apk = @apk.Apk::open(
+    s_v1_mixed_apk(
+      b"hello",
+      b"hello",
+      mf_two,
+      s_sf_sha512_two(),
+      s_pkcs7(b"cert"),
+    ),
+  )
+  let c = apk.signature_checks()[0]
+  assert_true(c.digest_ok, msg=c.detail)
+  assert_eq(c.entries_checked, 2)
+  assert_eq(c.entries_failed, 0)
+  assert_eq(c.digest_algorithm, "SHA-512")
+}
