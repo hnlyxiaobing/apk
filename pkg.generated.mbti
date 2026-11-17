@@ -41,6 +41,7 @@ pub(all) struct Apk {
 pub fn Apk::dex_files(Self) -> Array[DexEntry] raise ApkError
 pub fn Apk::entries(Self) -> Array[ZipEntryRef]
 pub fn Apk::entry(Self, String) -> Bytes raise ApkError
+pub fn Apk::integrity_checks(Self) -> Array[IntegrityCheck]
 pub fn Apk::manifest(Self) -> ManifestRef raise ApkError
 pub fn Apk::native_libs(Self, Abi?) -> Array[NativeLib] raise ApkError
 pub fn Apk::open(Bytes) -> Self raise ApkError
@@ -72,6 +73,17 @@ pub(all) struct ElfInfo {
 pub(all) struct ElfSymbol {
   name : String
   defined : Bool
+}
+
+pub(all) struct IntegrityCheck {
+  name : String
+  declared_size : UInt64
+  actual_size : UInt64?
+  crc32_expected : UInt32
+  crc32_actual : UInt32?
+  ok : Bool
+  aligned : Bool
+  error : String
 }
 
 pub(all) struct ManifestRef {

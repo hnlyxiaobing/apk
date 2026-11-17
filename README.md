@@ -22,11 +22,13 @@
 - 不做 Java 反编译、CFG、签名写入；不修改 APK
 - `signature_verified` 恒为 false，只是结构字段，**不是签名有效性结论**
 - 不 import 任何其他工作区模块
+- ELF 只读侦察**不做**反汇编 / 符号执行 / 重定位展开 / ELF 装载；`dart_markers` 仅是字节模式命中，**不做** Dart AOT 快照对象图 / 指令表 / 版本语义解析
+- `resources.arsc` 完整展开的**语义归属**判给外部 `axml` 库；本库 `resource_table_full` / `parse_resources_arsc` 自 2026-11-16 起**冻结不再增强**（API 冻结语义禁止删除，保留兼容）
 
 ## 2. 关键设计决策（本仓库自足记录）
 
 - 容器层只产出 `Bytes` 与索引值（ADR-0003 主决策）；下游靠 Wire `Blob` 承接。
-- 2026-11-07 把 `resources.arsc` 完整展开归 `axml`；本仓库后来也保留了一份实现，两份并存属已登记未决项。
+- 2026-11-16 裁决：`resources.arsc` 完整展开的**语义归属判给外部 `axml` 库**；本库 `resource_table_full` / `parse_resources_arsc` 自本日起**冻结不再增强**（API 冻结语义禁止删除，保留兼容）；跨库展开一致性差分由外部组合层承担，不在本仓库范围（详见 `docs/2026-11-16-container-trust-dev-plan.md` W9）。
 - 2026-11-10 ELF 只读侦察以纯插入方式落地，不改原决策、`ApkError` 复用 `BadElf`。
 - 唯一第三方依赖 `bobzhang/zip@0.1.2`（仅 deflate）；aapt2 在 1,028 个 local 头中 403 个写 1~3 B 裸填充，已规避并转永久回归。
 

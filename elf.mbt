@@ -1,7 +1,7 @@
 ///|
 /// ELF 只读结构化侦察（P2 加法性子能力，容器条目自身的只读元数据）。
 ///
-/// 契约边界（见 docs/DECISIONS.md §8）：本能力只读 `NativeLib.bytes` 内的 ELF 结构，
+/// 契约边界（见 docs/2026-11-16-container-trust-dev-plan.md §1）：本能力只读 `NativeLib.bytes` 内的 ELF 结构，
 /// 产出 apk 自有值类型（`ElfInfo` / `ElfSymbol` / `ElfClass`），不返回 `axml` / `dex`
 /// 等任何下游解析类型、不编排下游解析、不新增跨模块依赖；与 R4 已有的
 /// `NativeLib::elf_abi()` 的 ELF 头部解析同构，是「容器条目自身元数据」索引的加深，
