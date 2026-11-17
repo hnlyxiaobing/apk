@@ -22,6 +22,8 @@ fn pad_spec(data : Bytes, pad : Int32) -> ZSpec {
     extra_pad: pad,
     cd_extra: b"",
     bad_crc: false,
+    declared_size: None,
+    compressed_size: None,
   }
 }
 

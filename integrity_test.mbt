@@ -9,7 +9,16 @@
 ///|
 /// 构造一个带 `bad_crc`（中央目录与 local 头 CRC 写入 +1）的 ZSpec。
 fn bad_crc_spec(name : String, data : Bytes) -> ZSpec {
-  { name, comp_method: 0, data, extra_pad: 0, cd_extra: b"", bad_crc: true, }
+  {
+    name,
+    comp_method: 0,
+    data,
+    extra_pad: 0,
+    cd_extra: b"",
+    bad_crc: true,
+    declared_size: None,
+    compressed_size: None,
+  }
 }
 
 ///|
@@ -121,6 +130,8 @@ test "W1 T-W1-3 与 entry raise 行为逐条目一致" {
     extra_pad: 0,
     cd_extra: b"",
     bad_crc: false,
+    declared_size: None,
+    compressed_size: None,
   }
   let zip = build_zip(
     [zspec("ok.txt", b"ok"), zspec_deflated("d.txt", b"defl"), bad_method_spec],

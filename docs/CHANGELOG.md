@@ -43,10 +43,31 @@
 
 `moon check --deny-warn` / `moon build` / `moon test`（103/103，含 4 个新增 W1 用例）/ `moon fmt --check` / `moon info` + mbti **纯加法 diff**（12 行纯增），全绿。
 
+## 2026-11-17 — M2 工作包（W2 内存防线）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-17 |
+| 工作包 | W2 解压炸弹内存防线（闭合 B8：限额提取 `entry_capped`，三分段预检拒绝） |
+| 新增 pub 声明 | `pub fn Apk::entry_capped(Self, String, Int64) -> Bytes? raise ApkError` |
+| 快照 diff 结论 | **纯加法**：mbti 新增 1 行 `entry_capped`，零 modify/delete |
+| 测试增量 | `w2_memory_test.mbt`：T-W2-1a/b 伪造声明/膨胀比样本预检即拒 / T-W2-2 边界 ±1 字节 / T-W2-4 正常样本逐字节一致；`main_wbtest.mbt` 限额常量回归 |
+
+### 本次合入内容
+
+- **W2 能力**（`apk.mbt`）：新增 `Apk::entry_capped(name, limit)` 与内部 `extract_data_capped`，在 inflate 前按「声明尺寸 + DEFLATE 理论最大膨胀比 1032:1」双预检建立 sound 上界；预检通过后才解压并复核；超限一律返回 `None`（fail-closed，不产出部分数据）；解析错误仍 raise 既有 `ApkError`。
+- **CLI 防线上移**（`cmd/main/main.mbt`）：`--entry`/`--all` 路径改经 `entry_capped(name, 256 MiB)` 限额提取，超限 stderr + 退出码 1；既有大小预检保留声明尺寸专属错误文案，新增预检拒绝文案（`（预检拒绝）`）用于膨胀比 / 解压后复核路径。
+- **测试夹具扩展**（`apk_test.mbt`）：`ZSpec` 新增 `declared_size` / `compressed_size` 覆盖字段，支持伪造中央目录尺寸以构造 W2 样本。
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（109/109，含 6 个新增 W2 用例 + 1 个限额常量回归）/ `moon fmt --check` / `moon info` + mbti **纯加法 diff**（1 行纯增），全绿。
+
 ## 后续（预留登记位）
 
 - W1 批量完整性报告 —— 已完成（M1）
-- W2 内存防线 + W4 v1 SHA-512（待 M2）
+- W2 内存防线 —— 已完成（M2）
+- W4 v1 SHA-512（待 M2）
 - W3 证书解析 + W7 黄金差分（待 M3）
 - W5 verity + W8 Dart 符号定位（待 M4）
 - W6 公钥验签（待裁决后另排）

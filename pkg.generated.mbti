@@ -41,6 +41,7 @@ pub(all) struct Apk {
 pub fn Apk::dex_files(Self) -> Array[DexEntry] raise ApkError
 pub fn Apk::entries(Self) -> Array[ZipEntryRef]
 pub fn Apk::entry(Self, String) -> Bytes raise ApkError
+pub fn Apk::entry_capped(Self, String, Int64) -> Bytes? raise ApkError
 pub fn Apk::integrity_checks(Self) -> Array[IntegrityCheck]
 pub fn Apk::manifest(Self) -> ManifestRef raise ApkError
 pub fn Apk::native_libs(Self, Abi?) -> Array[NativeLib] raise ApkError

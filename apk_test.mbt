@@ -60,6 +60,8 @@ fn deflate_stored(data : Bytes) -> Bytes {
 
 ///|
 /// ZIP 条目描述（fixture 用）。
+/// `declared_size` / `compressed_size`：`Some(n)` 时中央目录用 `n` 覆盖实际值
+/// （W2 声明尺寸伪造 / 膨胀比预检用例）；`None` 用实际长度。
 struct ZSpec {
   name : String
   comp_method : Int32
@@ -67,16 +69,36 @@ struct ZSpec {
   extra_pad : Int32
   cd_extra : Bytes
   bad_crc : Bool
+  declared_size : Int32?
+  compressed_size : Int32?
 }
 
 ///|
 fn zspec(name : String, data : Bytes) -> ZSpec {
-  { name, comp_method: 0, data, extra_pad: 0, cd_extra: b"", bad_crc: false, }
+  {
+    name,
+    comp_method: 0,
+    data,
+    extra_pad: 0,
+    cd_extra: b"",
+    bad_crc: false,
+    declared_size: None,
+    compressed_size: None,
+  }
 }
 
 ///|
 fn zspec_deflated(name : String, data : Bytes) -> ZSpec {
-  { name, comp_method: 8, data, extra_pad: 0, cd_extra: b"", bad_crc: false, }
+  {
+    name,
+    comp_method: 8,
+    data,
+    extra_pad: 0,
+    cd_extra: b"",
+    bad_crc: false,
+    declared_size: None,
+    compressed_size: None,
+  }
 }
 
 ///|
@@ -86,6 +108,14 @@ fn build_zip(specs : Array[ZSpec], sig_block : Bytes?) -> Bytes {
   let cd : Array[Byte] = []
   for s in specs {
     let comp = if s.comp_method == 8 { deflate_stored(s.data) } else { s.data }
+    let eff_comp = match s.compressed_size {
+      Some(n) => n
+      None => comp.length()
+    }
+    let eff_decl = match s.declared_size {
+      Some(n) => n
+      None => s.data.length()
+    }
     let crc = t_crc32(s.data)
     let name_b = @encoding/utf8.encode(s.name)
     let local_off = out.length()
@@ -96,8 +126,8 @@ fn build_zip(specs : Array[ZSpec], sig_block : Bytes?) -> Bytes {
     push_u16(out, 0)
     push_u16(out, 0)
     push_u32(out, (if s.bad_crc { crc + 1 } else { crc }).reinterpret_as_int())
-    push_u32(out, comp.length())
-    push_u32(out, s.data.length())
+    push_u32(out, eff_comp)
+    push_u32(out, eff_decl)
     push_u16(out, name_b.length())
     push_u16(out, s.extra_pad)
     push_bytes(out, name_b)
@@ -113,8 +143,8 @@ fn build_zip(specs : Array[ZSpec], sig_block : Bytes?) -> Bytes {
     push_u16(cd, 0)
     push_u16(cd, 0)
     push_u32(cd, (if s.bad_crc { crc + 1 } else { crc }).reinterpret_as_int())
-    push_u32(cd, comp.length())
-    push_u32(cd, s.data.length())
+    push_u32(cd, eff_comp)
+    push_u32(cd, eff_decl)
     push_u16(cd, name_b.length())
     push_u16(cd, s.cd_extra.length())
     push_u16(cd, 0)
@@ -315,6 +345,8 @@ test "entry raises on unsupported compression method" {
     extra_pad: 0,
     cd_extra: b"",
     bad_crc: false,
+    declared_size: None,
+    compressed_size: None,
   }
   let apk = @apk.Apk::open(build_zip([s], None))
   try ignore(apk.entry("ab.txt")) catch {
@@ -337,6 +369,8 @@ test "entry raises on crc32 mismatch" {
     extra_pad: 0,
     cd_extra: b"",
     bad_crc: true,
+    declared_size: None,
+    compressed_size: None,
   }
   let apk = @apk.Apk::open(build_zip([s], None))
   try ignore(apk.entry("ab.txt")) catch {
@@ -668,6 +702,8 @@ test "open rejects ZIP64 extra field on entries" {
     extra_pad: 0,
     cd_extra: Bytes::from_array(extra[:]),
     bad_crc: false,
+    declared_size: None,
+    compressed_size: None,
   }
   try ignore(@apk.Apk::open(build_zip([s], None))) catch {
     @apk.ApkError::Zip64Unsupported(_) => ()
@@ -691,6 +727,8 @@ test "is_aligned reflects 4-byte data alignment" {
     extra_pad: 1,
     cd_extra: b"",
     bad_crc: false,
+    declared_size: None,
+    compressed_size: None,
   }
   let apk2 = @apk.Apk::open(build_zip([ok], None))
   assert_true(apk2.entries()[0].is_aligned)

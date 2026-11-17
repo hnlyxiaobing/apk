@@ -63,14 +63,8 @@ fn parent_dir(path : String) -> String {
 }
 
 ///|
-/// 单个条目解压后大小上限（256 MiB）。
+/// 单个条目解压后大小上限（256 MiB），作为 `entry_capped` 的限额传给库（W2 内存防线）。
 let max_extract_bytes : Int32 = 256 * 1024 * 1024
-
-///|
-/// 检查 `size` 是否未超过 `max_extract_bytes`，供 extract 路径与回归测试共用。
-fn is_extract_size_allowed(size : Int32) -> Bool {
-  size <= max_extract_bytes
-}
 
 ///|
 /// ZIP 条目名是否可安全拼接到 `--all` 的输出目录下：拒绝绝对路径、盘符 /
@@ -355,12 +349,15 @@ async fn cmd_extract(rest : ArrayView[String]) -> Int32 {
         }
       None => ()
     }
-    let bytes = a.entry(name)
-    if !is_extract_size_allowed(bytes.length()) {
-      eprintln(
-        "error: 条目 '\{name}' 解压后大小 \{bytes.length()} 超过上限 \{max_extract_bytes}",
-      )
-      return 1
+    // W2：经 entry_capped 限额提取，超限条目在 inflate 之前就被预检拒绝（闭合 B8）。
+    let bytes = match a.entry_capped(name, max_extract_bytes.to_int64()) {
+      Some(b) => b
+      None => {
+        eprintln(
+          "error: 条目 '\{name}' 解压大小超过上限 \{max_extract_bytes}（预检拒绝）",
+        )
+        return 1
+      }
     }
     let dest = if all { out_path + "/" + name } else { out_path }
     @fs.mkdir(parent_dir(dest), recursive=true, allow_exist=true)

@@ -475,6 +475,30 @@ pub fn Apk::entry(self : Apk, name : EntryName) -> Bytes raise ApkError {
 }
 
 ///|
+/// 限额提取（W2 解压炸弹内存防线）：输出超过 `limit` 时返回 `None`（fail-closed，不产出部分数据）。
+///
+/// 与 `Apk::entry` 的区别仅在**内存上界**：在调用一次性 inflate 之前就按「声明尺寸」与
+/// 「DEFLATE 理论最大膨胀比 1032:1」双预检建立 sound 上界，使伪造声明尺寸的恶意条目
+/// 无法先耗尽内存再被拒（闭合 B8）。解析错误（条目不存在、坏 CRC、尺寸不符、非法
+/// deflate 流等）仍 raise 既有 `ApkError`；`limit <= 0` 视为用法错误，按既有变体
+/// `BadCentralDirectory(0, "invalid limit")` 报告。
+pub fn Apk::entry_capped(
+  self : Apk,
+  name : EntryName,
+  limit : Int64,
+) -> Bytes? raise ApkError {
+  if limit <= 0 {
+    raise ApkError::BadCentralDirectory(0, "invalid limit")
+  }
+  for e in self.entries {
+    if e.name == name {
+      return extract_data_capped(self.source, e, limit)
+    }
+  }
+  raise ApkError::EntryNotFound(name)
+}
+
+///|
 /// `ContainerIndex` 只读索引契约的实现（语义与 `Apk::entry` / `Apk::entries` 一致）。
 pub impl ContainerIndex for Apk with fn entry(self : Apk, name : EntryName) -> Bytes raise ApkError {
   extract_entry(self.source, self.entries, name)
@@ -716,6 +740,37 @@ fn extract_data(source : Bytes, e : ZipEntryRef) -> Bytes raise ApkError {
     )
   }
   out
+}
+
+///|
+/// 限额解压单个条目（W2 内存防线的实现核心）：在 inflate 前按「声明尺寸 + 膨胀比」双预检
+/// 拒绝超限条目，超限一律返回 `None`（fail-closed，不产出部分数据）；预检通过后才调用既有
+/// `extract_data`（含 inflate 与 CRC/尺寸一致性校验），解压后复核实际长度不超限。
+/// 解析错误仍 raise 既有 `ApkError`，与 `extract_data` 一致。
+fn extract_data_capped(
+  source : Bytes,
+  e : ZipEntryRef,
+  limit : Int64,
+) -> Bytes? raise ApkError {
+  let limit_u = limit.reinterpret_as_uint64()
+  // 1. 声明尺寸预检：声明解压长度即超限 → 直接拒绝（不解压）。
+  if e.uncompressed_size > limit_u {
+    return None
+  }
+  // 2. 膨胀比预检（仅 deflate）：compressed_size 超过 limit/1032（整除向下取整，UInt64 防溢出）
+  //    即理论解压上界必超限 → 直接拒绝（不解压）。sound 上界依据：DEFLATE 最大膨胀比约 1032:1，
+  //    故 max_output ≤ compressed_size × 1032，output > limit ⟹ compressed_size > limit/1032。
+  if e.compression_method == 8 {
+    if e.compressed_size > limit_u / 1032 {
+      return None
+    }
+  }
+  // 3. 预检通过后才解压；解压后复核实际长度不超限（belt-and-suspenders 兜底）。
+  let out = extract_data(source, e)
+  if out.length().to_uint64() > limit_u {
+    return None
+  }
+  Some(out)
 }
 
 ///|
