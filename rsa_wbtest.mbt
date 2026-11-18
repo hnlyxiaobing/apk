@@ -173,3 +173,223 @@ test "T-W6-RSA-pss: known vector (EMSA-PSS-VERIFY)" {
     msg="wrong digest fails",
   )
 }
+
+///|
+/// 测试辅助：构造 n 个重复字节。
+fn rsa_t_repeat(b : Byte, n : Int32) -> Array[Byte] {
+  let out : Array[Byte] = []
+  for i = 0; i < n; i = i + 1 {
+    out.push(b)
+  }
+  out
+}
+
+///|
+/// 测试辅助：拼接字节段。
+fn rsa_t_cat(parts : Array[Array[Byte]]) -> Bytes {
+  let out : Array[Byte] = []
+  for p in parts {
+    for b in p {
+      out.push(b)
+    }
+  }
+  Bytes::from_array(out[:])
+}
+
+///|
+/// W6 覆盖率巡检：RSA 验签入口的零密钥 / 零指数 fail-closed 返回。
+/// 这些分支在正常样本下不可达（SPKI 解析已拒绝零值），属防御性返回，直接构造密钥钉住。
+test "W6 hardening: RSA 验签零模数/零指数 fail-closed" {
+  let zero = big_zero()
+  let one = big_from_hex("1")
+  let sig = rsa_t_cat([rsa_t_repeat(0x00, 127), [0x01]])
+  let digest = rsa_t_cat([rsa_t_repeat(0x11, 32)])
+  assert_true(!rsa_verify_pkcs1(rsa_key(zero, one), sig, digest, "SHA-256"))
+  assert_true(
+    !rsa_verify_pkcs1(rsa_key(big_from_hex("ff"), zero), sig, digest, "SHA-256"),
+  )
+  assert_true(!rsa_verify_pss(rsa_key(zero, one), sig, digest, "SHA-256"))
+  assert_true(
+    !rsa_verify_pss(rsa_key(big_from_hex("ff"), zero), sig, digest, "SHA-256"),
+  )
+}
+
+///|
+/// W6 覆盖率巡检：PKCS#1 v1.5 填充畸形分支（EM[1]!=01、非 FF、无分隔符、
+/// DigestInfo 长度/前缀不符、模数过小）。用 e=1 的测试公钥使 `m = EM`，从而可直接
+/// 构造任意编码块——这些分支对攻击者可控的签名值真实可达，全部必须返回 false。
+test "W6 hardening: PKCS#1 v1.5 填充畸形一律 fail-closed" {
+  let key = rsa_key(
+    big_from_be_bytes(Bytes::from_array(rsa_t_repeat(0xff, 128)[:])),
+    big_from_hex("1"),
+  )
+  let digest = rsa_t_cat([rsa_t_repeat(0x11, 32)])
+  // sep 前出现非 FF（0x02）。
+  let em_nonff = rsa_t_cat([[0x00, 0x01, 0x02], rsa_t_repeat(0xff, 125)])
+  assert_true(!rsa_verify_pkcs1(key, em_nonff, digest, "SHA-256"))
+  // 无 0x00 分隔符。
+  let em_nosep = rsa_t_cat([[0x00, 0x01], rsa_t_repeat(0xff, 126)])
+  assert_true(!rsa_verify_pkcs1(key, em_nosep, digest, "SHA-256"))
+  // DigestInfo 长度不符。
+  let em_badlen = rsa_t_cat([
+    [0x00, 0x01],
+    rsa_t_repeat(0xff, 100),
+    [0x00],
+    rsa_t_repeat(0xaa, 25),
+  ])
+  assert_true(!rsa_verify_pkcs1(key, em_badlen, digest, "SHA-256"))
+  // DigestInfo 前缀不符。
+  let em_badprefix = rsa_t_cat([
+    [0x00, 0x01],
+    rsa_t_repeat(0xff, 74),
+    [0x00],
+    rsa_t_repeat(0xaa, 51),
+  ])
+  assert_true(!rsa_verify_pkcs1(key, em_badprefix, digest, "SHA-256"))
+  // 不支持摘要名。
+  let em_ok = rsa_t_cat([[0x00, 0x01], rsa_t_repeat(0xff, 74), [0x00]])
+  assert_true(!rsa_verify_pkcs1(key, em_ok, digest, "SHA-1"))
+  // 模数太小，容纳不下 DigestInfo。
+  assert_true(
+    !rsa_verify_pkcs1(
+      rsa_key(big_from_hex("c5"), big_from_hex("1")),
+      bytes_from_hex("01"),
+      digest,
+      "SHA-256",
+    ),
+  )
+}
+
+///|
+/// W6 覆盖率巡检：PSS 验证的结构性失败返回（空摘要、emLen 不足、尾字节非 0xbc、
+/// 未用高位非 0、MGF1 不可用、PS 非全 0、分隔符非 0x01、H' 长度不符）。
+/// 均用 e=1 测试公钥直接构造 EM；任意一条都必须 fail-closed。
+test "W6 hardening: PSS 结构畸形与非常规摘要长度一律 fail-closed" {
+  let n128 = big_from_be_bytes(Bytes::from_array(rsa_t_repeat(0xff, 128)[:]))
+  let key = rsa_key(n128, big_from_hex("1"))
+  let dg32 = rsa_t_cat([rsa_t_repeat(0x11, 32)])
+  // 空摘要。
+  assert_true(
+    !rsa_verify_pss(
+      key,
+      rsa_t_cat([[0x01], rsa_t_repeat(0x00, 127)]),
+      b"",
+      "SHA-256",
+    ),
+  )
+  // emLen < hLen + saltLen + 2（512 位模数 + SHA-256）。
+  let n512 = big_from_be_bytes(Bytes::from_array(rsa_t_repeat(0xff, 64)[:]))
+  assert_true(
+    !rsa_verify_pss(
+      rsa_key(n512, big_from_hex("1")),
+      rsa_t_cat([rsa_t_repeat(0x00, 63), [0x01]]),
+      dg32,
+      "SHA-256",
+    ),
+  )
+  // EM 尾字节非 0xbc。
+  assert_true(
+    !rsa_verify_pss(
+      key,
+      rsa_t_cat([rsa_t_repeat(0x00, 127), [0x01]]),
+      dg32,
+      "SHA-256",
+    ),
+  )
+  // 未用最高位非 0（emBits=1023）。
+  assert_true(
+    !rsa_verify_pss(
+      key,
+      rsa_t_cat([[0x80], rsa_t_repeat(0x00, 126), [0xbc]]),
+      dg32,
+      "SHA-256",
+    ),
+  )
+  // MGF1 不支持的摘要名（20 字节摘要 + SHA-1）。
+  assert_true(
+    !rsa_verify_pss(
+      key,
+      rsa_t_cat([[0x00], rsa_t_repeat(0x00, 126), [0xbc]]),
+      rsa_t_cat([rsa_t_repeat(0x11, 20)]),
+      "SHA-1",
+    ),
+  )
+  // PS 非全 0。
+  let dg20 = rsa_t_cat([rsa_t_repeat(0x11, 20)])
+  let em_ps_nonzero = bytes_from_hex(
+    "74311a65e5a3f56d1eafe2cc786a2618d0967c37d42250566275f9569f8cc65931c02c34aea06163f7cf71373b773c0fb314b87916e10143d84583a1d24dcf41480e5b62a94a2c7064c7f2548cdf6866b7969d454f694a24189967121e5938852e9b29495b6d913feed50f3333333333333333333333333333333333333333bc",
+  )
+  assert_true(!rsa_verify_pss(key, em_ps_nonzero, dg20, "SHA-256"))
+  // DB 分隔符非 0x01。
+  let em_bad_sep = bytes_from_hex(
+    "75311a65e5a3f56d1eafe2cc786a2618d0967c37d42250566275f9569f8cc65931c02c34aea06163f7cf71373b773c0fb314b87916e10143d84583a1d24dcf41480e5b62a94a2c7064c7f2548cdf6866b7969d454f694b04189967121e5938852e9b29495b6d913feed50f3333333333333333333333333333333333333333bc",
+  )
+  assert_true(!rsa_verify_pss(key, em_bad_sep, dg20, "SHA-256"))
+  // 结构合法但摘要长度与 SHA-256 不符（H' 长度检查）。
+  let em_hp_len = bytes_from_hex(
+    "75311a65e5a3f56d1eafe2cc786a2618d0967c37d42250566275f9569f8cc65931c02c34aea06163f7cf71373b773c0fb314b87916e10143d84583a1d24dcf41480e5b62a94a2c7064c7f2548cdf6866b7969d454f694a24189967121e5938852e9b29495b6d913feed50f3333333333333333333333333333333333333333bc",
+  )
+  assert_true(!rsa_verify_pss(key, em_hp_len, dg20, "SHA-256"))
+  // 模数过小导致 emBits<=0（n=1，s=0）。
+  assert_true(
+    !rsa_verify_pss(
+      rsa_key(big_from_hex("1"), big_from_hex("1")),
+      bytes_from_hex("00"),
+      dg32,
+      "SHA-256",
+    ),
+  )
+  // m 的大端字节数超过 emLen（n=2^504+1，s=2^504，emLen=63）。
+  let n_504 = big_from_be_bytes(
+    rsa_t_cat([[0x01], rsa_t_repeat(0x00, 62), [0x01]]),
+  )
+  let sig_504 = rsa_t_cat([[0x01], rsa_t_repeat(0x00, 63)])
+  assert_true(
+    !rsa_verify_pss(rsa_key(n_504, big_from_hex("1")), sig_504, dg32, "SHA-256"),
+  )
+}
+
+///|
+/// 测试辅助：Option 是否为 None（RsaPublicKey 未派生 Eq）。
+fn rsa_t_is_none(o : RsaPublicKey?) -> Bool {
+  match o {
+    None => true
+    Some(_) => false
+  }
+}
+
+///|
+/// W6 覆盖率巡检：SPKI 解析的空 BIT STRING / 零模数 / 零指数拒绝分支。
+test "W6 hardening: SPKI 空 BIT STRING 与零值 RSA 公钥一律拒绝" {
+  // 合法 rsaEncryption 算法标识 + 空 BIT STRING。
+  assert_true(
+    rsa_t_is_none(
+      rsa_public_key_from_spki(
+        bytes_from_hex("3011300d06092a864886f70d01010105000300"),
+      ),
+    ),
+    msg="空 BIT STRING",
+  )
+  // n = 0。
+  assert_true(
+    rsa_t_is_none(
+      rsa_public_key_from_spki(
+        bytes_from_hex(
+          "301c300d06092a864886f70d0101010500030b0030080201000203010001",
+        ),
+      ),
+    ),
+    msg="零模数",
+  )
+  // e = 0。
+  assert_true(
+    rsa_t_is_none(
+      rsa_public_key_from_spki(
+        bytes_from_hex(
+          "301c300d06092a864886f70d0101010500030b0030080203010001020100",
+        ),
+      ),
+    ),
+    msg="零指数",
+  )
+}

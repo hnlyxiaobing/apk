@@ -111,9 +111,9 @@
 - W4 v1 SHA-512 —— 已完成（M2）
 - W3 证书解析 + W7 黄金差分 —— 已完成（M3）
 - W5 verity + W8 Dart 符号定位 —— 已完成（M4）
-- W6 公钥验签 —— **已裁决（2026-11-18）：仅 RSA 降级立项（方案 B）**，M5 推进中
+- W6 公钥验签 —— 已完成（2026-11-18）：仅 RSA（方案 B）；M6-RSA-a / M6-RSA-b / M6-RSA-fix / M6-6 + W6-hardening-1..5 全部合入；ECDSA 挂起 `#skip`
 
-### 2026-11-18 — M5 启动（W6 仅 RSA 降级立项裁决落款）
+### 2026-11-18 — W6 立项裁决落款（原「M5 启动」；仅 RSA 降级，方案 B）
 
 | 项 | 值 |
 |---|---|
@@ -124,7 +124,7 @@
 
 - README §2 新增 2026-11-18 裁决行；§6 清理 arsc「未裁决去重」残留漂移；
 - dev-plan 状态行 + W6 节头 + §4 里程碑表 + 风险/止损段全部更新为方案 B；
-- 后续按 M6-1→M6-2→M6-4→M6-5→M6-6（仅 RSA）逐里程碑合入。
+- 后续按 M6-RSA-a（合并 M6-1/2/4）→ M6-RSA-b（原 M6-5）→ M6-RSA-fix → M6-6（仅 RSA）逐里程碑合入（最终命名）。
 
 ### 2026-11-18 — M6-RSA-a（合并原 M6-1/2/4：大数+RSA PKCS#1 v1.5+v2/v3/v3.1 接入，公开入口落地）
 
@@ -180,10 +180,87 @@
 | 工作包 | M6-6：`apksigner verify` oracle 差分 harness + CLI `verify` 子命令 |
 | 新增 pub 声明 | **无**（CLI 子命令，非库 API） |
 | 快照 diff 结论 | **零 diff** |
-| oracle 状态 | 本机无 Android SDK build-tools（`apksigner`/`java` 均缺失）→ **显式 SKIPPED**（exit 78） |
+| oracle 状态 | 本机无 Android SDK build-tools（`apksigner`/`java` 均缺失）→ **当时显式 SKIPPED**（exit 78）。**后续 W6-hardening-3 已实跑真实 oracle（6/6 AGREE），以该节为准**。 |
 | 自检结果 | `--self-test` 模式（无 oracle）：fx-multidex-v1 / fx-multidex-v2v3 / fx-multidex-unsigned 三件受控样本，库内结论与期望 3/3 一致（v1=v2=v3 crypto_verified=true，unsigned=无签名）。**真实 apksigner 生成样本在库内全数验签通过**，即 T-W6-2 的实证 |
 | 实现文件 | `cmd/main/main.mbt`（`verify` 子命令：`VERIFY|scheme|structure_ok|digest_ok|crypto_verified|algo` 行式输出 + JSON）；`tests/apksigner_oracle_diff.py`（oracle 差分 runner：SDK 探测 / exit 78 SKIPPED / 三样本对账）；`verify_test.mbt`（T-W6-6a/b 显式 `#skip` + 契约测试升级为真实样本双方案断言） |
 
 ### 门禁
 
 `moon check --deny-warn` / `moon build` / `moon test`（163/163 全绿，`#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — W6-hardening-1（新解析器畸形/位翻转回归语料）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | 把 W6 新解析路径纳入 L1 位翻转/畸形语料：签名块头与长度字段、CMS SignedData（`sd_len`/`sigs_len`/`rec_len`/signers 序列）、X.509 SPKI（`pk_len`/算法标识/非 RSA）、DER INTEGER 与大数输入、签名值长度 ≠ 模数长度 |
+| 新增 pub 声明 | **无** |
+| 快照 diff 结论 | **零 diff** |
+| 实现文件 | `fixtures_malformed_test.mbt`（+198 行，真实样本重建 + 逐字节变异）、`verify_wbtest.mbt`（+296 行，白盒解析入口位翻转/截断） |
+| 结论 | 未发现 panic；所有变异均落到 `raise ApkError` 或 `structure_ok=false` / `crypto_verified=false`。每个断言都先做未变异基线校准，防「全 false 假绿」 |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（172/172 全绿）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — W6-hardening-2（模数规模上限 8192 位）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | RSA 验签入口（PKCS#1 / PSS / v1 CMS / v2-v3）对模数 bit 长设 8192 位硬上限；超限值化返回 `crypto_verified=false`，detail=`"key too large"`，**不新增 `ApkError` 变体**、不进入模幂 |
+| 新增 pub 声明 | **无** |
+| 快照 diff 结论 | **零 diff** |
+| 实现文件 | `rsa.mbt`（`rsa_max_modulus_bits` + `rsa_key_too_large`）、`cms.mbt`（v1 signerInfo 入口守卫）、`verify.mbt`（v2/v3 signer 入口守卫）、`verify_wbtest.mbt` / `fixtures_malformed_test.mbt`（65544 位模数有界返回用例） |
+| 威胁模型 | 闭合「攻击者可控模数无上限」导致的 DoS 面；用例完成即证明有界返回（不卡死） |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（174/174 全绿）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — W6-hardening-3（真实 apksigner oracle 实跑）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | 安装 Android build-tools r34（便携 JDK17）后实跑 `tests/apksigner_oracle_diff.py`：3 件真 RSA（fx-multidex-v1 / tvshell-debug / oracle-rsa-v123）+ 3 件篡改（v2 签名、v2 证书、v1 MANIFEST 摘要），**6/6 AGREE** |
+| 新增 pub 声明 | **无** |
+| 快照 diff 结论 | **零 diff** |
+| 发现并修复 | CLI `verify` 退出码此前只要求 `crypto_verified`，导致「MANIFEST 摘要被篡改但 signerInfo 签名完好」的 v1 APK 误判通过；已改为要求 `structure_ok && digest_ok && crypto_verified`，四组合单测钉住 |
+| 样本口径 | oracle-rsa-v123 与 3 件篡改样本在 `%TEMP%` 临时生成、不入库；`fx-multidex-v2v3.apk` 缺 `META-INF/MANIFEST.MF`，apksigner 直接拒绝，仅做库内自一致校验 |
+| 对账输出 | `compared=6 mismatches=0`（逐样本明细见提交 `f2d222c` commit message） |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（175/175 全绿）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — W6-hardening-4（fixture 可复现性 + 资产账本）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | 固化 `tests/fixtures/gen_w6_fixtures.py`（仅标准库 + `cryptography`），可重生成 11 件 inline 样本（v1 ok/bad/noattr、v2 ok/bad、PSS-SHA256/512、PKCS1-SHA512、v3、v3.1、ecdsa）；`tests/ASSETS.md` 登记每件样本 SHA-256 + 来源口径 |
+| 新增 pub 声明 | **无** |
+| 快照 diff 结论 | **零 diff** |
+| 字节差异说明 | 旧 inline 由未入库的临时脚本与已丢失私钥生成，无法字节复现；重生成样本保持相同语义（方案/算法 ID/失败模式），断言未变，差异原因已写入提交 `206b834` message |
+| 校验命令 | `python tests/fixtures/gen_w6_fixtures.py --check verify_wbtest.mbt` → 11/11 OK |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（175/175 全绿）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — W6-hardening-5（安全敏感代码覆盖巡检 + 文档去漂移）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | `moon coverage` 巡检 `bigint.mbt` / `rsa.mbt` / `cms.mbt` / `verify.mbt`；补 v1 CMS 摘要 OID / messageDigest 属性 OID 同长变异、合成 CMS（证书公钥超限、signerInfos 缺失）、PSS/PKCS#1 填充畸形等最小测试；清理 CHANGELOG 中「M5 推进中」旧命名 |
+| 新增 pub 声明 | **无** |
+| 快照 diff 结论 | **零 diff** |
+| 测试增量 | `fixtures_malformed_test.mbt` +1（合成 CMS：key too large / signerInfos 缺失）、`verify_wbtest.mbt` +1（OID 同长变异三出口）、`rsa_wbtest.mbt` +4（零模数/零指数、PKCS#1 填充畸形、PSS 结构畸形、SPKI 空 BIT STRING/零值） |
+| 覆盖结论 | 四个文件剩余 5 行为**不可达防御分支**，已在 dev-plan §3.W6 逐条登记理由（`rsa.mbt:298/329`、`verify.mbt:59/63/111`）；`moon coverage analyze` 因 `cms.mbt` 解析失败不可用，改用 `moon coverage report -- -f caret` |
+| 文档同步 | dev-plan §3.W6 增补加固记录 + 已知限制（PSS salt=hLen、向量非 FIPS/NIST、`--self-test` 非外部裁判）；test-system-design F12 行由「oracle SKIPPED」更新为「已实跑 6/6 AGREE」 |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（186/186 全绿，1 个 `#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。

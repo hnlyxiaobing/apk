@@ -1,6 +1,6 @@
 # apk 容器信任与功能补齐开发文档
 
-> 建立：2026-11-16 ｜ 状态：W1 ✓ W2 ✓ W3 ✓ W4 ✓ W5 ✓ W7 ✓ W8 ✓（M4，2026-11-17）＋ W6 已裁决（仅 RSA 降级）｜ M6-RSA-a ✓ + M6-RSA-b ✓ + M6-RSA-fix ✓ + M6-6 ✓（SKIPPED·无 SDK，harness 就绪）（2026-11-18，v1/v2/v3/v3.1 RSA 真验签 163/163 全绿）｜ 适用仓库：本仓库（hnlyxiaobing/apk，独立自包含）
+> 建立：2026-11-16 ｜ 状态：W1 ✓ W2 ✓ W3 ✓ W4 ✓ W5 ✓ W7 ✓ W8 ✓（M4，2026-11-17）＋ W6 已裁决（仅 RSA 降级）｜ M6-RSA-a ✓ + M6-RSA-b ✓ + M6-RSA-fix ✓ + M6-6 ✓（2026-11-18，v1/v2/v3/v3.1 RSA 真验签 163/163 全绿）｜ W6-hardening-1..5 ✓（2026-11-18，oracle 6/6 AGREE，186/186 全绿）｜ 适用仓库：本仓库（hnlyxiaobing/apk，独立自包含）
 > 配套文档：[2026-11-16-test-system-design.md](2026-11-16-test-system-design.md)（测试系统设计，工作包验收测试 ID 以 `T-` 开头者均出自该文档）
 > 本文所有「现状」结论均为 2026-11-16 对本仓库源码的实测核对，非转述历史文档。
 
@@ -218,11 +218,29 @@ pub fn Apk::verify_signatures(Self) -> Array[SignatureVerification] raise ApkErr
 > **门禁现实（2026-11-18 记录）**：`moon check --deny-warn` 会把「仅被 `_wbtest`/`_test` 引用、无非测试消费方」的内部函数判为 `unused_value`（白盒测试不计入未用分析），因此**任何纯内部里程碑（如孤立的大数模块）都无法独立过门禁**。W6 唯一合法的非测试消费方是公开入口 `verify_signatures`，故 RSA 降级路径必须按「公开入口所在里程碑」聚合，原 M6-1/2/4/5 四等分合并为两档（各含公开入口 + 测试），见下。这不是范围缩减，仅过程聚合，最终交付物不变。
 - **M6-RSA-a（合并原 M6-1/2/4，公开入口 v2/v3/v3.1）**：纯 MoonBit 无符号大数（Array[UInt32] limb：加/减/乘/模/模幂）+ RSA PKCS#1 v1.5 验证原语 + DigestInfo ASN.1 比对（SHA-256/512）+ v2/v3/v3.1 接入（signed data 按**长度前缀序列化字节**重序列化后验签）。随本档落公开 API：`SignatureVerification` 结构 + `Apk::verify_signatures`（**先只打通 RSA 分支**；v1 本期返回 fail-closed、后续档接入）。FIPS/已知向量测试（大数 + RSA）。
 - **M6-RSA-b（原 M6-5）**：v1 接入：CMS SignedData 的 signerInfo 签名值验证（复用 W3 DER 读取器），并入 `verify_signatures` 的 v1 分支。已知向量测试。
-- **M6-6 与 `apksigner verify` 本地 oracle 差分（真/假样本各 ≥3，oracle 缺失显式 SKIPPED）**。
+- **M6-6 与 `apksigner verify` 本地 oracle 差分（真/假样本各 ≥3；2026-11-18 已实跑 6/6 AGREE）**。
 
 **风险与止损**：大数/曲线实现是安全敏感代码，侧信道不在本库威胁模型内（离线分析工具），但**正确性必须向量全覆盖**；任一里程碑向量不过即停，不得带病推进。**已按方案 B 降级为仅 RSA**（2026-11-18 裁决）：ECDSA 曲线运算（M6-3）不实现，`crypto_verified` 对 ECDSA 恒 false，风险压缩至大数模幂 + RSA 原语一处。
 
 **验收**：T-W6-1 各算法 NIST/已知向量 100%；T-W6-2 apksigner 判 Verifies 的受控样本 `crypto_verified=true`；T-W6-3 篡改样本 false；T-W6-4 旧 API 行为逐字节回归零漂移；T-W6-5 不支持算法 fail-closed。
+
+**W6 加固与验证补完（2026-11-18，M6 之后；不新增公开 API）**：
+
+- **畸形/位翻转回归**：签名块头与长度字段、CMS SignedData（`sd_len`/`sigs_len`/`rec_len`/signers 序列）、X.509 SPKI（`pk_len`/算法标识/非 RSA）、DER INTEGER 与大数输入、签名长度 ≠ 模数长度、v1 `.SF` 位翻转/缺 `.SF` 均纳入 L1 语料（`fixtures_malformed_test.mbt` + `verify_wbtest.mbt` + `rsa_wbtest.mbt`）。口径：任意变异后只允许 `raise ApkError` 或 `structure_ok=false` / `crypto_verified=false`；未变异基线必须验签通过（防「全 false 假绿」）。实测未发现 panic。
+- **模数上限**：RSA 验签入口（PKCS#1 / PSS / v1 CMS / v2-v3）对模数 bit 长设 8192 位硬上限，超限值化返回 `crypto_verified=false`，detail=`"key too large"`，不新增 `ApkError` 变体、不进入模幂；65544 位模数用例有界返回。
+- **真实 oracle**：build-tools r34 / apksigner 0.9 实跑 6 件样本（3 真 RSA + 3 篡改），**6/6 AGREE**（`compared=6 mismatches=0`，明细见 CHANGELOG W6-hardening-3）。M6-6 的「SKIPPED」状态由实跑结果覆盖；`fx-multidex-v2v3.apk` 缺 `META-INF/MANIFEST.MF`，apksigner 直接拒绝，仅做库内自一致校验。发现的真实缺陷：CLI `verify` 过去只要求 `crypto_verified`，已改为 `structure_ok && digest_ok && crypto_verified`。
+- **fixture 可复现**：`tests/fixtures/gen_w6_fixtures.py`（仅标准库 + `cryptography`）生成 11 件 inline 样本，`--check` 与 `verify_wbtest.mbt` 字节一致；SHA-256 与来源口径登记在 `tests/ASSETS.md`。
+- **覆盖率巡检**（`moon coverage report -- -f caret`；`moon coverage analyze` 因 `cms.mbt` 解析失败不可用）：四个安全敏感文件剩余 5 行，逐条登记为不可达防御分支：
+  - `rsa.mbt:298`（`ps_len < 0`）：被 `em_len >= h_len + salt_len + 2` 守卫支配，代入 `salt_len = h_len` 后 `ps_len >= 0` 恒成立；
+  - `rsa.mbt:329`（PSS 未知 hash）：未知 hash 时 `mgf1` 已返回空并在 `db_mask.length() != db_len` 处失败，无法到达；
+  - `verify.mbt:59/63`（v1 `v1_sf`/`v1_block` 为 None）：`collect_signature_records` 对 V1 记录恒填 `Some`，属纵深防御；
+  - `verify.mbt:111`（`content_digest` 返回 None）：v2/v3 记录存在即 `signing_block_off` 为 Some，且循环已过滤为 SHA-256/SHA-512。
+
+**已知限制（本轮不解决，如实登记）**：
+
+- PSS 的 salt 长度硬编码等于摘要长度（hLen，Android 口径）；RFC 8017 允许其他 salt 长度，本库对非 hLen salt 的签名判失败，属已知严格性限制（见 `rsa.mbt` `rsa_verify_pss` 注释）。
+- 现有「已知向量」是与 `cryptography` 等二手实现交叉验证的结果，**不是 FIPS/NIST 权威向量**，不得表述为权威向量通过。
+- `--self-test` 只是库内自洽（库对比自设期望值），不是外部裁判；T-W6-2/T-W6-3 的独立性依据是 W6-hardening-3 的 6 件 apksigner 实跑样本（3 真 + 3 篡改），样本规模有限，不构成全面保证。
 
 ### W7 真实 .so ABI 黄金差分——许可安全路径（P1/M）
 
@@ -283,7 +301,7 @@ M1（第 2–3 日）    W1 批量完整性报告                  ← 首个能
 M2（第 4–6 日）    W2 内存防线 + W4 v1 SHA-512        ← 安全与摘要半环闭合
 M3（第 7–9 日）    W3 证书解析 + W7 黄金差分双轨       ← 合规初筛能力成型
 M4（当前）         W5 verity + W8 Dart 符号定位       ← 识别层纵深
-M5（收尾，2026-11-18）  W6 公钥验签·仅 RSA  ← M6-RSA-a ✓ + M6-RSA-b ✓ + M6-RSA-fix ✓（算法 ID/PSS/v3 布局修正）+ M6-6 ✓（SKIPPED·无 SDK，harness 就绪）；ECDSA 分支挂起 #skip
+M6（W6 公钥验签·仅 RSA，2026-11-18）  ← M6-RSA-a ✓ + M6-RSA-b ✓ + M6-RSA-fix ✓（算法 ID/PSS/v3 布局修正）+ M6-6 ✓（oracle 实跑 6/6 AGREE）+ W6-hardening-1..5 ✓；ECDSA 分支挂起 #skip
 ```
 
 排序判据：先零风险文档、再安全缺口、再高价值低成本能力、最后安全敏感大工程。每个工作包独立提交（一个包 ≥1 条实质 commit），独立过五门禁，互不阻塞。

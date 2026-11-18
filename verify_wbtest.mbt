@@ -568,3 +568,137 @@ test "W6 hardening: 模数 bit 长上限 8192，超限有界返回" {
     )
   }
 }
+
+///|
+/// W6 覆盖率巡检：`extract_scheme_verify` 的四个内部长度守卫
+/// （signer 长度缺失、signed-data 长度缺失、signatures 长度缺失、公钥长度缺失）。
+/// 这些位置此前只由顶层截断覆盖不全，这里逐条构造并通过 `w6_extract_raises` 钉住。
+test "W6 malformed: 签名序列内部长度守卫逐条触发" {
+  let (v, scheme) = w6_scheme_value(fixture_apk_v2_ok())
+  let f = w6_value_fields(v, false)
+  // 序列长度 < 4：进入 while 但读不到 signer 长度。
+  assert_true(w6_extract_raises(w6_set_u32(v, f[0], 2), scheme))
+  // signer 长度 = 1：signer 内读不到 signed-data 长度。
+  assert_true(w6_extract_raises(w6_set_u32(v, f[1], 1), scheme))
+  // sd_len 恰好耗尽 signer：读不到 signatures 长度。
+  let signer_len = w6_u32(v, f[1])
+  assert_true(w6_extract_raises(w6_set_u32(v, f[2], signer_len - 4), scheme))
+  // signer 截止到签名序列末尾：读不到公钥长度。
+  let sigs_len = w6_u32(v, f[3])
+  let truncated = w6_set_u32(v, f[1], f[3] + 4 + sigs_len - 8)
+  assert_true(w6_extract_raises(truncated, scheme))
+}
+
+///|
+/// W6 覆盖率巡检：CMS 摘要工具函数的边界返回（SHA-512 分支、空算法、
+/// 长度不符、逐字节不符、空 signedAttrs）。
+test "W6 coverage: cms_hash / cms_digest_eq / cms_attrs_as_set 边界" {
+  let data = b"abc"
+  // SHA-512 分支。
+  assert_eq(cms_hash("SHA-512", data).length(), 64)
+  // 不支持的摘要算法 → 空。
+  assert_eq(cms_hash("MD5", data).length(), 0)
+  // 摘要长度不符。
+  assert_true(!cms_digest_eq("SHA-256", data, b"\x00\x01"))
+  // 长度相同但字节不符。
+  assert_true(!cms_digest_eq("SHA-256", data, cms_hash("SHA-256", b"abd")))
+  // 一致。
+  assert_true(cms_digest_eq("SHA-256", data, cms_hash("SHA-256", data)))
+  // 不支持的算法 → false。
+  assert_true(!cms_digest_eq("MD5", data, cms_hash("SHA-256", data)))
+  // 空 signedAttrs 直接返回空（防御分支）。
+  assert_eq(cms_attrs_as_set(b"").length(), 0)
+}
+
+///|
+/// 查找子串首次出现的偏移；找不到返回 -1。
+fn w6_find_sub(hay : Bytes, needle : Bytes) -> Int32 {
+  let n = needle.length()
+  let mut i = 0
+  while i + n <= hay.length() {
+    let mut j = 0
+    while j < n && hay[i + j] == needle[j] {
+      j = j + 1
+    }
+    if j == n {
+      return i
+    }
+    i = i + 1
+  }
+  -1
+}
+
+///|
+/// 把所有 `needle` 的最后一个字节改为 `last`（仅用于同长度 OID 变异）。
+fn w6_mut_oid_last(der : Bytes, needle : Bytes, last : Byte) -> Bytes {
+  let out : Array[Byte] = []
+  for b in der {
+    out.push(b)
+  }
+  let n = needle.length()
+  let mut i = 0
+  while i + n <= out.length() {
+    let mut j = 0
+    while j < n && out[i + j] == needle[j] {
+      j = j + 1
+    }
+    if j == n {
+      out[i + n - 1] = last
+      i = i + n
+    } else {
+      i = i + 1
+    }
+  }
+  Bytes::from_array(out[:])
+}
+
+///|
+/// W6 覆盖率巡检：v1 CMS 摘要算法 OID / messageDigest 属性 OID 同长变异。
+/// 直接调用 `verify_v1_signer_info`，覆盖 unsupported 算法、SHA-512 映射、
+/// messageDigest 属性缺失三条 fail-closed 出口。
+test "W6 coverage: v1 CMS 摘要 OID 同长变异 fail-closed" {
+  let apk = Apk::open(fixture_apk_v1_ok())
+  let der = apk.safe_entry("META-INF/TEST.RSA").unwrap()
+  let sf = apk.safe_entry("META-INF/TEST.SF").unwrap()
+  let certs = pkcs7_certificates(der)
+  assert_true(certs.length() > 0, msg="CMS 内含证书")
+  // 基线校准：未变异必须验签通过。
+  let (ok0, algo0, _) = verify_v1_signer_info(certs, sf, der)
+  assert_true(ok0, msg="基线验签通过")
+  assert_eq(algo0, "SHA256withRSA")
+  // SHA-256 OID 2.16.840.1.101.3.4.2.1；末字节改 0x02/0x03 即 SHA-384/SHA-512（等长）。
+  let sha256_oid = b"\x06\x09\x60\x86\x48\x01\x65\x03\x04\x02\x01"
+  assert_true(
+    w6_find_sub(der, sha256_oid) >= 0,
+    msg="样本含 SHA-256 摘要 OID",
+  )
+  let (ok1, algo1, detail1) = verify_v1_signer_info(
+    certs,
+    sf,
+    w6_mut_oid_last(der, sha256_oid, b'\x02'),
+  )
+  assert_true(!ok1, msg="不支持的摘要算法必须 fail-closed")
+  assert_eq(algo1, "unsupported")
+  assert_true(detail1.contains("unsupported"))
+  let (ok2, algo2, detail2) = verify_v1_signer_info(
+    certs,
+    sf,
+    w6_mut_oid_last(der, sha256_oid, b'\x03'),
+  )
+  assert_true(
+    !ok2,
+    msg="SHA-512 与 messageDigest 长度不符必须 fail-closed",
+  )
+  assert_eq(algo2, "SHA512withRSA")
+  assert_true(detail2.contains("messageDigest"))
+  // messageDigest 属性 OID …1.9.4 末字节改 0x05 → 属性不可识别（signedAttrs 仍在）。
+  let md_oid = b"\x06\x09\x2a\x86\x48\x86\xf7\x0d\x01\x09\x04"
+  assert_true(w6_find_sub(der, md_oid) >= 0, msg="样本含 messageDigest OID")
+  let (ok3, _, detail3) = verify_v1_signer_info(
+    certs,
+    sf,
+    w6_mut_oid_last(der, md_oid, b'\x05'),
+  )
+  assert_true(!ok3, msg="缺 messageDigest 必须 fail-closed")
+  assert_true(detail3.contains("messageDigest"))
+}

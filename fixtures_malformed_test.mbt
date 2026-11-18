@@ -535,3 +535,156 @@ test "apk hardening: 超大模数 fail-closed 且 detail=key too large" {
   assert_true(!checks[0].crypto_verified, msg="超限模数必须 fail-closed")
   assert_eq(checks[0].detail, "key too large")
 }
+
+///|
+/// W6 覆盖率巡检：v1 `.SF` 内容位翻转 → CMS messageDigest 与签名关联失败。
+/// 覆盖 `verify_v1_signer_info` 的摘要不符 / 逐字节比较失败返回。
+test "apk malformed: v1 .SF 内容位翻转 fail-closed（真实样本重建）" {
+  let apk = @apk.Apk::open(fixture_fx_multidex_v1_apk())
+  let base : Array[ZSpec] = []
+  for
+    n in [
+      "AndroidManifest.xml", "resources.arsc", "classes.dex", "classes2.dex", "META-INF/MANIFEST.MF",
+    ] {
+    base.push(zspec(n, apk.entry(n)))
+  }
+  let sf = apk.entry("META-INF/FXKEY.SF")
+  let der = apk.entry("META-INF/FXKEY.RSA")
+  let rebuild = fn(sf_new : Bytes) -> Bytes {
+    let specs : Array[ZSpec] = []
+    for s in base {
+      specs.push(s)
+    }
+    specs.push(zspec("META-INF/FXKEY.SF", sf_new))
+    specs.push(zspec("META-INF/FXKEY.RSA", der))
+    build_zip(specs, None)
+  }
+  // 基线校准：原 .SF 重建后必须仍可验签。
+  let ok = @apk.Apk::open(rebuild(sf)).verify_signatures()
+  assert_true(ok.length() > 0, msg="重建 v1 方案存在")
+  assert_true(ok[0].crypto_verified, msg="重建基线验签通过")
+  // 位翻转（含首字节、版本行、摘要行、末字节）。
+  for i in [0, 1, 10, 20, sf.length() / 2, sf.length() - 1] {
+    if i >= 0 && i < sf.length() {
+      assert_true(
+        w6_verify_fail_closed(rebuild(fx_xor(sf, i, b'\x01'))),
+        msg=".SF @\{i} 位翻转应 fail-closed",
+      )
+    }
+  }
+}
+
+///|
+/// W6 覆盖率巡检：v1 记录缺 `.SF`（仍保留 `.RSA`）时，`verify_v1_crypto` 的
+/// 安全出口必须为结构可解析但 `crypto_verified=false`，不得 panic。
+test "apk malformed: v1 缺 .SF（保留 .RSA）fail-closed" {
+  let apk = @apk.Apk::open(fixture_fx_multidex_v1_apk())
+  let specs : Array[ZSpec] = []
+  for
+    n in [
+      "AndroidManifest.xml", "resources.arsc", "classes.dex", "classes2.dex", "META-INF/MANIFEST.MF",
+      "META-INF/FXKEY.RSA",
+    ] {
+    specs.push(zspec(n, apk.entry(n)))
+  }
+  let checks = @apk.Apk::open(build_zip(specs, None)).verify_signatures()
+  assert_true(checks.length() > 0, msg="仍识别 v1 记录")
+  assert_true(!checks[0].crypto_verified, msg="缺 .SF 必须 fail-closed")
+}
+
+///|
+/// W6 覆盖率巡检：v2 公钥为合法 SPKI 但非 RSA（此处 EC）时，
+/// `verify_v2_crypto` 必须走 fail-closed 出口而不是尝试验签。
+test "apk hardening: v2 非 RSA SPKI fail-closed" {
+  let pk : Bytes = b"\x30\x13\x30\x0b\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x05\x00\x03\x04\x00\xaa\xbb\xcc"
+  let value = w6_v2_value(pk)
+  let apk_bytes = build_zip(
+    [zspec("AndroidManifest.xml", b"\x03\x00\x08\x00")],
+    Some(sig_block_of([(0x7109871aU, value)])),
+  )
+  let checks = @apk.Apk::open(apk_bytes).verify_signatures()
+  assert_eq(checks.length(), 1)
+  assert_true(checks[0].structure_ok)
+  assert_true(
+    !checks[0].crypto_verified,
+    msg="非 RSA 公钥必须 fail-closed",
+  )
+  assert_eq(checks[0].algo, "unsupported")
+}
+
+// ---------------------------------------------------------------------------
+// W6 覆盖率巡检：合成 PKCS#7 —— 证书公钥超限 / signerInfos 缺失。
+// 两条都是 `cms_signer_infos` 与 `verify_v1_signer_info` 的防御性出口。
+// ---------------------------------------------------------------------------
+
+///|
+/// 构造最小 X.509 证书外壳（tbs 第 6 个子项为 SPKI）。
+fn w6_fake_cert(spki : Bytes) -> Bytes {
+  let tbs : Array[Byte] = []
+  push_bytes(tbs, w6_der(0x02, b"\x01"))
+  push_bytes(tbs, w6_der(0x30, b""))
+  push_bytes(tbs, w6_der(0x30, b""))
+  push_bytes(tbs, w6_der(0x30, b""))
+  push_bytes(tbs, w6_der(0x30, b""))
+  push_bytes(tbs, spki)
+  let body : Array[Byte] = []
+  push_bytes(body, w6_der(0x30, Bytes::from_array(tbs[:])))
+  push_bytes(body, w6_der(0x30, b""))
+  push_bytes(body, w6_der(0x03, b"\x00"))
+  w6_der(0x30, Bytes::from_array(body[:]))
+}
+
+///|
+/// 构造最小 CMS ContentInfo{ signedData }；`signers` 为 None 时省略 signerInfos。
+fn w6_cms_with(cert : Bytes, signers : Bytes?) -> Bytes {
+  let sd : Array[Byte] = []
+  push_bytes(sd, w6_der(0x02, b"\x01"))
+  push_bytes(sd, w6_der(0x31, b""))
+  push_bytes(sd, w6_der(0x30, b"\x06\x09\x2a\x86\x48\x86\xf7\x0d\x01\x07\x01"))
+  let certs : Array[Byte] = []
+  push_bytes(certs, cert)
+  push_bytes(sd, w6_der(0xa0, Bytes::from_array(certs[:])))
+  match signers {
+    Some(si) => push_bytes(sd, w6_der(0x31, si))
+    None => ()
+  }
+  let ci : Array[Byte] = []
+  push_bytes(ci, b"\x06\x09\x2a\x86\x48\x86\xf7\x0d\x01\x07\x02")
+  push_bytes(ci, w6_der(0xa0, w6_der(0x30, Bytes::from_array(sd[:]))))
+  w6_der(0x30, Bytes::from_array(ci[:]))
+}
+
+///|
+test "apk hardening: v1 CMS 证书公钥超限 / signerInfos 缺失 fail-closed" {
+  let apk = @apk.Apk::open(fixture_fx_multidex_v1_apk())
+  let base : Array[ZSpec] = []
+  for
+    n in [
+      "AndroidManifest.xml", "resources.arsc", "classes.dex", "classes2.dex", "META-INF/MANIFEST.MF",
+      "META-INF/FXKEY.SF",
+    ] {
+    base.push(zspec(n, apk.entry(n)))
+  }
+  // 8200 位模数（1025 字节 0xFF）→ 超过 8192 位上限，必须值化失败而非进入模幂。
+  let mod : Array[Byte] = []
+  for i = 0; i < 1025; i = i + 1 {
+    mod.push(b'\xff')
+  }
+  let big_cert = w6_fake_cert(w6_rsa_spki(Bytes::from_array(mod[:])))
+  let c_big = @apk.Apk::open(w6_v1_with_rsa(base, w6_cms_with(big_cert, None))).verify_signatures()
+  assert_true(c_big.length() > 0, msg="超限公钥样本仍识别 v1")
+  assert_true(c_big[0].structure_ok, msg="CMS 结构可解析")
+  assert_true(!c_big[0].crypto_verified, msg="超限模数必须 fail-closed")
+  assert_eq(c_big[0].detail, "v1 signerInfo: key too large")
+  // signerInfos 缺失：SignedData 可解析到 certs，但 SET OF SignerInfo 不存在。
+  let small_cert = w6_fake_cert(w6_rsa_spki(b"\x01\x00\x01"))
+  let c_no_si = @apk.Apk::open(
+    w6_v1_with_rsa(base, w6_cms_with(small_cert, None)),
+  ).verify_signatures()
+  assert_true(c_no_si.length() > 0, msg="缺 signerInfos 样本仍识别 v1")
+  assert_true(
+    !c_no_si[0].crypto_verified,
+    msg="缺 signerInfos 必须 fail-closed",
+  )
+  assert_eq(c_no_si[0].detail, "v1 signerInfo: CMS SignedData unreadable")
+}

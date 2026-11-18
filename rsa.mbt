@@ -209,6 +209,10 @@ fn rsa_verify_pkcs1(
 ///
 /// 用于 Android APK Signature Scheme 的 0x0101（PSS+SHA-256）/ 0x0102（PSS+SHA-512）
 /// 签名算法 ID。`msg_digest` 为待验数据的摘要（`H(M)`），而非消息本身。
+///
+/// 已知严格性限制：`salt_len` 硬编码等于 `h_len`（Android 签名口径），RFC 8017 允许
+/// 其他 salt 长度（含 salt=0 与「按签名值自动探测」）。本库对非 hLen salt 的合法签名
+/// 会判 `false`（fail-closed，不误判为通过）；如需通用 PSS 需显式传入 salt 长度。
 fn rsa_verify_pss(
   key : RsaPublicKey,
   signature : Bytes,
