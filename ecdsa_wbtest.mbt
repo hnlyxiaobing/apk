@@ -259,3 +259,159 @@ test "T-W6-EC-verify: r/s 越界与非法公钥一律 fail-closed" {
   )
   assert_true(!ec_ecdsa_verify(p256_params, qx_bad, qy, e, r, s))
 }
+
+// ---------------------------------------------------------------------------
+// 里程碑 b：EC SPKI / DER 签名解析 + v2 调度链白盒端到端（RFC 6979 A.2.5）
+// ---------------------------------------------------------------------------
+
+///|
+/// P-256 EC SPKI（RFC 6979 A.2.5 公钥 U，未压缩点）。
+fn ec_test_spki_p256() -> Bytes {
+  bytes_from_hex(
+    "3059301306072a8648ce3d020106082a8648ce3d0301070342000460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+  )
+}
+
+///|
+/// RFC 6979 A.2.5 签名的 DER 编码 `SEQUENCE{INTEGER r, INTEGER s}`（均带 0x00 符号填充）。
+fn ec_test_sig_der() -> Bytes {
+  bytes_from_hex(
+    "3046022100efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8",
+  )
+}
+
+///|
+/// 构造单个 v2 signer 验签数据（白盒测试辅助）。
+fn ec_test_signer(
+  public_key : Bytes,
+  alg_id : UInt32,
+  sig : Bytes,
+) -> SignerVerifyData {
+  { signed_data: b"sample", signatures: [(alg_id, sig)], public_key, }
+}
+
+///|
+test "T-W6-EC-b-spki: P-256 SPKI 解析出 P256 与公钥坐标" {
+  match ec_public_key_from_spki(ec_test_spki_p256()) {
+    Some((curve, qx, qy)) => {
+      assert_true(curve is EcCurve::P256, msg="curve is P-256")
+      assert_eq(
+        big_to_hex(qx),
+        "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+      )
+      assert_eq(
+        big_to_hex(qy),
+        "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+      )
+    }
+    None => fail("P-256 SPKI should parse")
+  }
+}
+
+///|
+test "T-W6-EC-b-spki: P-384 SPKI 解析出 P384 与公钥坐标" {
+  let spki = bytes_from_hex(
+    "3076301006072a8648ce3d020106052b8104002203620004ec3a4e415b4e19a4568618029f427fa5da9a8bc4ae92e02e06aae5286b300c64def8f0ea9055866064a254515480bc138015d9b72d7d57244ea8ef9ac0c621896708a59367f9dfb9f54ca84b3f1c9db1288b231c3ae0d4fe7344fd2533264720",
+  )
+  match ec_public_key_from_spki(spki) {
+    Some((curve, qx, qy)) => {
+      assert_true(curve is EcCurve::P384, msg="curve is P-384")
+      assert_eq(
+        big_to_hex(qx),
+        "ec3a4e415b4e19a4568618029f427fa5da9a8bc4ae92e02e06aae5286b300c64def8f0ea9055866064a254515480bc13",
+      )
+      assert_eq(
+        big_to_hex(qy),
+        "8015d9b72d7d57244ea8ef9ac0c621896708a59367f9dfb9f54ca84b3f1c9db1288b231c3ae0d4fe7344fd2533264720",
+      )
+    }
+    None => fail("P-384 SPKI should parse")
+  }
+}
+
+///|
+test "T-W6-EC-b-spki: 坏 OID / 非 EC OID / BIT STRING 截断一律 None" {
+  // ecPublicKey OID 末字节篡改（…02 01 → …02 02）。
+  let bad_oid = bytes_from_hex(
+    "3059301306072a8648ce3d020206082a8648ce3d0301070342000460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+  )
+  assert_true(ec_public_key_from_spki(bad_oid) is None, msg="坏 OID")
+  // 非 EC：RSA SPKI（OID 1.2.840.113549.1.1.1）。
+  let rsa_spki = bytes_from_hex("3013300d06092a864886f70d010101050003020000")
+  assert_true(ec_public_key_from_spki(rsa_spki) is None, msg="非 EC OID")
+  // BIT STRING 长度改为 0x40（少 2 字节）：点长度不符。
+  let bad_bit = bytes_from_hex(
+    "3059301306072a8648ce3d020106082a8648ce3d0301070340000460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+  )
+  assert_true(ec_public_key_from_spki(bad_bit) is None, msg="BIT STRING 截断")
+  // 外层非 SEQUENCE。
+  assert_true(
+    ec_public_key_from_spki(bytes_from_hex("03020000")) is None,
+    msg="非 SEQUENCE",
+  )
+  assert_true(ec_public_key_from_spki(b"") is None, msg="空输入")
+}
+
+///|
+test "T-W6-EC-b-der: 正确 DER 签名解析出 (r,s)" {
+  match ec_sig_from_der(ec_test_sig_der()) {
+    Some((r, s)) => {
+      assert_eq(
+        big_to_hex(r),
+        "efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716",
+      )
+      assert_eq(
+        big_to_hex(s),
+        "f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8",
+      )
+    }
+    None => fail("valid DER signature should parse")
+  }
+}
+
+///|
+test "T-W6-EC-b-der: 截断 / 非 SEQUENCE / 缺 INTEGER 一律 None" {
+  let der = ec_test_sig_der()
+  assert_true(ec_sig_from_der(der[0:20].to_owned()) is None, msg="截断")
+  assert_true(ec_sig_from_der(b"\x02\x01\x01") is None, msg="非 SEQUENCE")
+  // 只有 r，没有 s。
+  assert_true(
+    ec_sig_from_der(bytes_from_hex("3003020101")) is None,
+    msg="缺 s",
+  )
+  assert_true(ec_sig_from_der(b"") is None, msg="空输入")
+}
+
+///|
+test "T-W6-EC-b-v2: RFC 6979 向量走 v2 调度链 crypto_verified=true" {
+  let signer = ec_test_signer(ec_test_spki_p256(), 0x0201U, ec_test_sig_der())
+  let (ok, algo, detail) = verify_v2_signers([signer])
+  assert_true(ok, msg="ECDSA signature verifies over signed data")
+  assert_eq(algo, "SHA256withECDSA")
+  assert_true(detail.contains("ECDSA"), msg="detail reports ECDSA")
+}
+
+///|
+test "T-W6-EC-b-v2: 非 EC SPKI / 截断签名 / 篡改 r 一律 fail-closed" {
+  // RSA SPKI + ECDSA 算法 ID：两条公钥解析路径都不适用 → false。
+  let rsa_spki = bytes_from_hex("3013300d06092a864886f70d010101050003020000")
+  let (ok0, _, detail0) = verify_v2_signers([
+    ec_test_signer(rsa_spki, 0x0201U, ec_test_sig_der()),
+  ])
+  assert_true(!ok0, msg="非 EC SPKI 必须 fail-closed")
+  assert_true(detail0.contains("SPKI"), msg="detail reports unparseable SPKI")
+  // 签名 DER 截断。
+  let der = ec_test_sig_der()
+  let (ok1, _, _) = verify_v2_signers([
+    ec_test_signer(ec_test_spki_p256(), 0x0201U, der[0:20].to_owned()),
+  ])
+  assert_true(!ok1, msg="截断签名必须 fail-closed")
+  // 篡改 r（末字节 0x16 → 0x17）。
+  let bad_r = bytes_from_hex(
+    "3046022100efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3717022100f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8",
+  )
+  let (ok2, _, _) = verify_v2_signers([
+    ec_test_signer(ec_test_spki_p256(), 0x0201U, bad_r),
+  ])
+  assert_true(!ok2, msg="篡改 r 必须 fail-closed")
+}

@@ -78,11 +78,11 @@ fn Apk::verify_v1_crypto(self : Apk, rec : SigRecord) -> SignatureVerification {
 }
 
 ///|
-/// v2/v3/v3.1 签名值验签（RSA PKCS#1 v1.5 分支）。
+/// v2/v3/v3.1 签名值验签（RSA PKCS#1 v1.5 / PSS 与 ECDSA）。
 ///
 /// 签名覆盖的原始数据 = signer 的 **signed-data 内容字节**（digests + certificates +
 /// [min/maxSDK] + attributes 的长度前缀序列化，不含其自身长度前缀），即 apksigner
-/// 口径的 `dataToSign`。对每个 signature 记录按算法 ID 决定摘要算法并 RSA 验签。
+/// 口径的 `dataToSign`。对每个 signature 记录按算法 ID 决定摘要算法并验签。
 fn Apk::verify_v2_crypto(self : Apk, rec : SigRecord) -> SignatureVerification {
   let signers = self.try_extract_scheme_verify(rec)
   if signers is None {
@@ -116,14 +116,32 @@ fn Apk::verify_v2_crypto(self : Apk, rec : SigRecord) -> SignatureVerification {
   }
   // 结构合法 = 至少一个 signer，且签名记录与公钥字段齐全。
   let structure_ok = signers.length() > 0
-  // 逐个 signer 尝试 RSA 验签；任一 RSA PKCS1 签名通过即 crypto_verified=true。
+  // 逐个 signer 尝试 RSA / ECDSA 验签；任一签名通过即 crypto_verified=true。
+  let (crypto_verified, algo, detail) = verify_v2_signers(signers)
+  {
+    scheme: rec.scheme,
+    structure_ok,
+    digest_ok,
+    crypto_verified,
+    algo,
+    detail,
+  }
+}
+
+///|
+/// 对一组 signer 做签名值验签：先按 RSA SPKI 解析，失败再按 EC SPKI 解析。
+///
+/// RSA：算法 ID 0x0101/0x0102 = RSA-PSS(SHA-256/512)，0x0103/0x0104 = PKCS#1 v1.5。
+/// ECDSA：0x0201 = SHA256withECDSA、0x0202 = SHA512withECDSA（无 PSS 变体），
+/// 签名值为 DER `SEQUENCE{INTEGER r, INTEGER s}`。两者都无法识别时 fail-closed。
+fn verify_v2_signers(
+  signers : Array[SignerVerifyData],
+) -> (Bool, String, String) {
   let mut crypto_verified = false
   let mut algo = "unsupported"
   let mut detail = "no verifiable RSA signature"
   for s in signers {
-    let key = rsa_public_key_from_spki(s.public_key)
-    match key {
-      None => detail = "public key is not a parseable RSA SPKI"
+    match rsa_public_key_from_spki(s.public_key) {
       Some(k) =>
         if rsa_key_too_large(k) {
           // 模数超 8192 位：fail-closed，且不进入模幂（DoS 面收敛）。
@@ -131,7 +149,7 @@ fn Apk::verify_v2_crypto(self : Apk, rec : SigRecord) -> SignatureVerification {
         } else {
           for (alg_id, sig_bytes) in s.signatures {
             // Android 签名算法 ID：0x0101/0x0102 = RSA-PSS(SHA-256/512)，
-            // 0x0103/0x0104 = RSA-PKCS#1 v1.5(SHA-256/512)；其余（ECDSA/DSA）不支持。
+            // 0x0103/0x0104 = RSA-PKCS#1 v1.5(SHA-256/512)；其余不支持。
             let (hash_name, digest, pss) = match alg_id {
               0x0101U => ("SHA-256", sha256(s.signed_data), true)
               0x0102U => ("SHA-512", sha512(s.signed_data), true)
@@ -169,16 +187,52 @@ fn Apk::verify_v2_crypto(self : Apk, rec : SigRecord) -> SignatureVerification {
             }
           }
         }
+      None =>
+        match ec_public_key_from_spki(s.public_key) {
+          None => detail = "public key is not a parseable RSA or EC SPKI"
+          Some((curve, qx, qy)) =>
+            match ec_params(curve) {
+              None => detail = "unsupported EC curve"
+              Some(params) =>
+                for (alg_id, sig_bytes) in s.signatures {
+                  // ECDSA 无 PSS 版本：0x0201 只对应 SHA-256、0x0202 只对应 SHA-512。
+                  let (hash_name, digest) = match alg_id {
+                    0x0201U => ("SHA-256", sha256(s.signed_data))
+                    0x0202U => ("SHA-512", sha512(s.signed_data))
+                    _ => ("", b"")
+                  }
+                  if hash_name == "" {
+                    detail = "signature failed verification or unsupported algorithm"
+                    continue
+                  }
+                  match ec_sig_from_der(sig_bytes) {
+                    None => detail = "ECDSA signature value is not valid DER"
+                    Some((r, sig_s)) =>
+                      if ec_ecdsa_verify(
+                          params,
+                          qx,
+                          qy,
+                          big_from_be_bytes(digest),
+                          r,
+                          sig_s,
+                        ) {
+                        crypto_verified = true
+                        algo = if hash_name == "SHA-256" {
+                          "SHA256withECDSA"
+                        } else {
+                          "SHA512withECDSA"
+                        }
+                        detail = "ECDSA signature verified over signed data"
+                      } else {
+                        detail = "ECDSA signature failed verification"
+                      }
+                  }
+                }
+            }
+        }
     }
   }
-  {
-    scheme: rec.scheme,
-    structure_ok,
-    digest_ok,
-    crypto_verified,
-    algo,
-    detail,
-  }
+  (crypto_verified, algo, detail)
 }
 
 ///|

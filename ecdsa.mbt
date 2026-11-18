@@ -426,6 +426,139 @@ fn ec_ecdsa_verify(
 }
 
 // ---------------------------------------------------------------------------
+// 里程碑 b：EC SubjectPublicKeyInfo / DER 签名解析（接入 v2/v3/v3.1 与 v1 的输入层）
+// ---------------------------------------------------------------------------
+
+///|
+/// OID 1.2.840.10045.2.1（ecPublicKey）。
+let oid_ec_public_key : Bytes = b"\x2a\x86\x48\xce\x3d\x02\x01"
+
+///|
+/// OID 1.2.840.10045.3.1.7（prime256v1 / NIST P-256）。
+let oid_ec_p256 : Bytes = b"\x2a\x86\x48\xce\x3d\x03\x01\x07"
+
+///|
+/// OID 1.3.132.0.34（secp384r1 / NIST P-384）。
+let oid_ec_p384 : Bytes = b"\x2b\x81\x04\x00\x22"
+
+///|
+/// EC 曲线 OID → `EcCurve`；未知曲线返回 `Unknown`（fail-closed）。
+fn ec_curve_from_oid(b : Bytes, start : Int32, end : Int32) -> EcCurve {
+  if der_oid_is(b, start, end, oid_ec_p256) {
+    EcCurve::P256
+  } else if der_oid_is(b, start, end, oid_ec_p384) {
+    EcCurve::P384
+  } else {
+    EcCurve::Unknown
+  }
+}
+
+///|
+/// 从 X.509 EC SubjectPublicKeyInfo（SPKI）DER 提取曲线与公钥点 (qx, qy)。
+///
+/// 结构：`SEQUENCE { SEQUENCE { OID ecPublicKey, OID curve }, BIT STRING }`；
+/// BIT STRING 内容为 `unused_bits(0x00) || 0x04 || x || y`（未压缩点）。
+/// P-256 各坐标 32 字节、P-384 各 48 字节。非 EC / 未知曲线 / 结构畸形返回 None。
+fn ec_public_key_from_spki(spki : Bytes) -> (EcCurve, BigInt, BigInt)? {
+  let len = spki.length()
+  if len < 8 {
+    return None
+  }
+  let outer = match der_read(spki, 0, len) {
+    Some(t) => t
+    None => return None
+  }
+  if outer.tag != 0x30 {
+    return None
+  }
+  let alg = match der_read(spki, outer.body, outer.end) {
+    Some(t) => t
+    None => return None
+  }
+  if alg.tag != 0x30 {
+    return None
+  }
+  // AlgorithmIdentifier: OID ecPublicKey，紧随其后是曲线 OID（tag 0x06，非子 SEQUENCE）。
+  let key_oid = match der_read(spki, alg.body, alg.end) {
+    Some(t) => t
+    None => return None
+  }
+  if key_oid.tag != 0x06 ||
+    !der_oid_is(spki, key_oid.body, key_oid.end, oid_ec_public_key) {
+    return None
+  }
+  let curve_oid = match der_read(spki, key_oid.end, alg.end) {
+    Some(t) => t
+    None => return None
+  }
+  if curve_oid.tag != 0x06 {
+    return None
+  }
+  let curve = ec_curve_from_oid(spki, curve_oid.body, curve_oid.end)
+  let coord_len = match curve {
+    EcCurve::P256 => 32
+    EcCurve::P384 => 48
+    EcCurve::Unknown => return None
+  }
+  let bit = match der_read(spki, alg.end, outer.end) {
+    Some(t) => t
+    None => return None
+  }
+  if bit.tag != 0x03 {
+    return None
+  }
+  // BIT STRING：unused bits（0x00）|| 0x04 || x || y。
+  if bit.end - bit.body < 2 || spki[bit.body] != b'\x00' {
+    return None
+  }
+  let point_len = 1 + 2 * coord_len
+  if bit.end - (bit.body + 1) != point_len {
+    return None
+  }
+  if spki[bit.body + 1] != b'\x04' {
+    return None
+  }
+  let x_start = bit.body + 2
+  let y_start = x_start + coord_len
+  let qx = big_from_be_bytes(spki[x_start:y_start].to_owned())
+  let qy = big_from_be_bytes(spki[y_start:bit.end].to_owned())
+  Some((curve, qx, qy))
+}
+
+///|
+/// 解析 DER 编码的 ECDSA 签名 `SEQUENCE { INTEGER r, INTEGER s }`。
+///
+/// DER INTEGER 可能带前导 0x00 符号填充（高位为 1 时），复用 `big_from_der_integer`
+/// 处理。非 SEQUENCE / 截断 / 非 INTEGER 返回 None（fail-closed，不 panic）。
+fn ec_sig_from_der(der : Bytes) -> (BigInt, BigInt)? {
+  let len = der.length()
+  let seq = match der_read(der, 0, len) {
+    Some(t) => t
+    None => return None
+  }
+  if seq.tag != 0x30 {
+    return None
+  }
+  let r_tlv = match der_read(der, seq.body, seq.end) {
+    Some(t) => t
+    None => return None
+  }
+  if r_tlv.tag != 0x02 {
+    return None
+  }
+  let s_tlv = match der_read(der, r_tlv.end, seq.end) {
+    Some(t) => t
+    None => return None
+  }
+  if s_tlv.tag != 0x02 {
+    return None
+  }
+  let r = big_from_der_integer(der, r_tlv.body, r_tlv.end)
+  let s = big_from_der_integer(der, s_tlv.body, s_tlv.end)
+  Some((r, s))
+}
+
+// ---------------------------------------------------------------------------
 // 公开入口（里程碑 a 自带的合法非测试消费方，承载上述全部内部原语）
 // ---------------------------------------------------------------------------
 
