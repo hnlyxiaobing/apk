@@ -1,7 +1,7 @@
 // L1 性质/变异测试（docs/2026-11-16-test-system-design.md §4）。
 // 零风险：只测既有公共 API（`@apk.`），不改库源码。
 // 覆盖：
-//   §4.1 变形律 P1–P5（P5 按文档标记 #skip，原因见下）
+//   §4.1 变形律 P1–P5（P5 于收口轮 P3 落地：白盒实现见 apk_wbtest.mbt，黑盒 #skip 已移除）
 //   §4.3 截断扫描（A4，全局不变量「任意前缀不 panic」）
 //   §6.2 错误变体簿记（10 个 ApkError 变体各 ≥1 显式触发）
 //
@@ -125,19 +125,6 @@ test "P4 idempotence" {
       msg="同 open 重复提取确定性一致",
     )
   }
-}
-
-///|
-/// P5：签名块位移不变性。**#skip（临时，收口轮 P3 落地）**——W5 verity 结构解析
-/// 已于 M4（2026-11-17）落地，原「deferred to M2」理由已过期。本测试需构造「签名块
-/// 整体平移、内容区随动重算摘要」的 v2 样本族并断言 `digest_ok`/`crypto_verified` 不变；
-/// 因 `content_digest`/`verify_v2` 为私有入口，实现在白盒测试文件（见 apk_wbtest.mbt P5），
-/// 本黑盒块随 P3 实现同步移除。
-#skip
-test "P5 signing-block shift invariance [SKIPPED: implemented in whitebox P5 during closing round]" {
-  println(
-    "SKIPPED: P5 signing-block shift resolved in whitebox during closing round (P3)",
-  )
 }
 
 ///|

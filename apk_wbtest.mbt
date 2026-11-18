@@ -408,3 +408,84 @@ test "whitebox: v2 content digest aggregation" {
     msg="签名算法 ID 不参与内容摘要聚合",
   )
 }
+
+///|
+/// P5：签名块位移不变性（白盒，收口轮 P3 落地）。
+///
+/// 第一性原理澄清：`content_digest` **不是**字面上的位移不变量——section1
+/// `[0, signing_block_off)` 随块起始平移而变（多了/少了块前的内容区字节），
+/// 且 EOCD 副本里的中央目录偏移字段会改写为新的块起始偏移，因此摘要必然改变。
+/// 诚实的、可测的性质是：
+///   1. `content_digest` 正确跟踪当前块偏移：对「整体平移、内容区随动重算摘要」
+///      的新布局，重算出的摘要与原布局摘要不同；
+///   2. `verify_v2` 对平移后**重新哈希**的样本报 `digest_ok=true`；
+///   3. `verify_v2` 对「旧布局摘要套用平移布局」的陈旧样本报 `digest_ok=false`
+///      （fail-closed），绝不把陈旧/被篡改样本误判为通过；
+///   4. 三种情形下 `signature_verified` 恒为 false（W6 fail-closed）。
+test "whitebox: P5 signing-block shift invariance" {
+  // 布局 A：块偏移 sbA；布局 B：块偏移 sbB = sbA + 16（整体平移）。
+  let sbA = 32
+  let sbB = 48
+  let cdA = 64
+  let cdB = 80
+  let cd_size = 48
+  // 两条 source 的 section1 长度不同（[0,cdA) 与 [0,cdB)），内容区随块随动。
+  let srcA = w_dummy_apk(sbA, cdA, cd_size)
+  let srcB = w_dummy_apk(sbB, cdB, cd_size)
+  let apkA : Apk = {
+    source: srcA,
+    entries: [],
+    signing_block_off: Some(sbA.to_uint64()),
+  }
+  let apkB : Apk = {
+    source: srcB,
+    entries: [],
+    signing_block_off: Some(sbB.to_uint64()),
+  }
+  let dA = apkA.content_digest("SHA-256").unwrap()
+  let dB = apkB.content_digest("SHA-256").unwrap()
+  // (1) 位移确实改变摘要：内容区随动重算，非字面不变。
+  assert_true(
+    dA != dB,
+    msg="签名块平移后内容区随动重算，摘要应不同",
+  )
+  let recA = w_sig_rec_v2(dA)
+  let recB = w_sig_rec_v2(dB)
+  // (2) 随动重算：各布局配各自重算摘要 → digest_ok=true。
+  let chkA = apkA.verify_v2(recA)
+  assert_true(chkA.digest_ok, msg="原布局重算摘要一致")
+  assert_true(chkA.structure_ok, msg="原布局结构完整")
+  let chkB = apkB.verify_v2(recB)
+  assert_true(chkB.digest_ok, msg="平移后随动重算摘要一致")
+  assert_true(chkB.structure_ok, msg="平移后结构完整")
+  // (3) fail-closed：陈旧摘要（布局 A 的 dA）套用平移布局 B → digest_ok=false。
+  let chk_stale = apkB.verify_v2(recA)
+  assert_true(
+    !chk_stale.digest_ok,
+    msg="陈旧摘要对平移布局 fail-closed",
+  )
+  // (4) 签名从不冒充通过。
+  assert_true(!chkA.signature_verified, msg="signature_verified 恒为 false")
+  assert_true(!chkB.signature_verified, msg="signature_verified 恒为 false")
+  assert_true(
+    !chk_stale.signature_verified,
+    msg="signature_verified 恒为 false",
+  )
+}
+
+///|
+/// 构造一条 v2 SigRecord，只带 SHA-256 内容摘要记录（不涉及真实 RSA 验签）。
+fn w_sig_rec_v2(digest : Bytes) -> SigRecord {
+  {
+    scheme: SignatureScheme::V2,
+    block_id: 0x7109871aU,
+    certs: [b"cert"],
+    digests: [{ algorithm: 0x0101U, digest, }],
+    pkcs7_ok: true,
+    v1_sf: None,
+    v1_manifest: None,
+    value_off: 0,
+    value_len: 0,
+    v1_block: None,
+  }
+}

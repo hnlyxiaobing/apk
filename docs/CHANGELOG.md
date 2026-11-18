@@ -310,3 +310,20 @@
 ### 门禁
 
 `moon check --deny-warn` / `moon build` / `moon test`（186/186 全绿，1 个 `#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — 收口轮 P3（L1/R 残余裁决）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | 收口轮 P3：P5 白盒落地（消除 L1 唯一 `#skip`）+ R 哈希门禁演示 + P1–P6 复盘点 |
+| 新增 pub 声明 | **无**（`pkg.generated.mbti` 零 diff；P5 测试仅新增私有 `w_sig_rec_v2` 白盒辅助） |
+| 快照 diff 结论 | **零 diff** |
+| P5 | 签名块位移不变性由黑盒 `#skip` 转为白盒落地：`apk_wbtest.mbt`「whitebox: P5 signing-block shift invariance」。第一性原理澄清 `content_digest` 非字面位移不变量（section1 `[0,sb)` 随块起始平移而变、EOCD 副本 CD 偏移改写为新块起点，故摘要必然改变）；诚实断言四点——平移后随动重算摘要不同、`verify_v2` 对随动重算样本 `digest_ok=true`、对旧布局陈旧摘要套用平移布局 `digest_ok=false`（fail-closed）、三种情形 `signature_verified` 恒 false。对应 `l1_property_test.mbt` 的 P5 黑盒 `#skip` 块随实现同步移除 |
+| R | `tests/local_real_diff.py` 哈希门禁演示一次：以未登记样本 `tests/fixtures/base.apk` 跑，`exit 78` 拒绝，消息含「未登记于 tests/ASSETS.md 白名单 → 拒绝」；因许可红线白名单当前为空，真实第三方 .so 差分结论从不进入 `moon test` 通过计数 |
+| P1–P6 复盘点 | P1 bare-padding / P2 entry-reorder / P3 unrelated-append / P4 idempotence（`l1_property_test.mbt`）、P5 shift-invariance（`apk_wbtest.mbt`）、P6 dual-channel（`integrity_test.mbt`）全部落地且绿；剩余 `#skip` 均为文档化合法缺口（ECDSA 真验签、真实第三方 .so/oracle 差分、W5 树重算、畸形样本），共 8 个实际 `#skip` 测试块 |
+| 验证命令 | `moon test` → 187/187 全绿（较 P2 的 186 新增 1 个 P5 白盒用例）；`python tests/local_real_diff.py tests/fixtures/base.apk` → exit 78（哈希门禁拒绝未登记样本） |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（187/187 全绿，8 个 `#skip` 测试块显式单列不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
