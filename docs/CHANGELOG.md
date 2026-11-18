@@ -264,3 +264,18 @@
 ### 门禁
 
 `moon check --deny-warn` / `moon build` / `moon test`（186/186 全绿，1 个 `#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — 收口轮 P0（文档去漂移）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | 收口轮 P0：消除文档与代码的过期/冲突陈述（不做功能变更） |
+| 新增 pub 声明 | **无** |
+| 快照 diff 结论 | **零 diff** |
+| 测试增量 | **无**（仅注释文案，`#skip` 计数不变） |
+| 改动 | README §6：oracle 状态由「本机无 SDK → SKIPPED」更正为「2026-11-18 已实跑 build-tools r34 6/6 AGREE，属外部依赖不纳入常驻测试」；test-system-design §10 验收复选框按实况标注 L1 部分落地 / L4/L5/R 收口轮待建，§9 复验入口标注 cli_e2e.py 由收口轮 P1 落地；l1_property_test.mbt P5 `#skip` 理由由过期「W5 未落地 deferred to M2」更正为「W5 已于 M4 落地、P5 实现在白盒收口轮 P3」 |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（186/186 全绿，1 个 `#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。

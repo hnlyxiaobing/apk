@@ -102,7 +102,7 @@ pub(all) struct ZipEntryRef {
 ## 6. 风险与未决
 
 - `resources.arsc` 完整展开的**语义归属**已裁决判给外部 `axml` 库（见 §2 决策行）；本库 `resource_table_full` / `parse_resources_arsc` 冻结不再增强，无「未裁决去重」遗留。
-- `verify_signatures()`（W6，公钥验签）已于 2026-11-18 裁决立项，采用**仅 RSA 降级**（方案 B）：M6-RSA-a/b 已落地 v1 CMS 与 v2/v3/v3.1 的 RSA（PKCS#1 v1.5 + PSS）真验签，真实 apksigner 样本对账全绿；M6-6 oracle 差分 harness 就绪（本机无 SDK → 显式 SKIPPED，exit 78）；ECDSA 分支 `crypto_verified` 恒 false（fail-closed，`#skip` 立项），`signature_verified` 恒 false 语义不变。
+- `verify_signatures()`（W6，公钥验签）已于 2026-11-18 裁决立项，采用**仅 RSA 降级**（方案 B）：M6-RSA-a/b 已落地 v1 CMS 与 v2/v3/v3.1 的 RSA（PKCS#1 v1.5 + PSS）真验签；M6-6 oracle 差分 harness（`tests/apksigner_oracle_diff.py`）已于 2026-11-18 实跑 build-tools r34：3 真 RSA + 3 篡改 **6/6 AGREE**（见 CHANGELOG W6-hardening-3）。oracle 属外部依赖（需 Android SDK build-tools），本地缺失时按纪律显式 SKIPPED（exit 78）、不计入通过；ECDSA 分支 `crypto_verified` 恒 false（fail-closed，`#skip` 立项），`signature_verified` 恒 false 语义不变。
 - 第三方 APK 许可不明，禁止入库；受控自建样本与哈希登记见本仓库 `tests/fixtures/`。
 - `zip@0.1.2` 单人维护、star=0 的 bus factor 风险已登记，不阻断使用。
 

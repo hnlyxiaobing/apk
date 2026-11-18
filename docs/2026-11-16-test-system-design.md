@@ -199,7 +199,7 @@ F = 申报核心功能，S = 预期使用场景，C = 安全约束。「现状�
 ```text
 moon clean ; moon check --deny-warn ; moon build ; moon test ; moon fmt --check
 moon info ; git diff --exit-code -- pkg.generated.mbti cmd/main/pkg.generated.mbti
-python tests/cli_e2e.py            # L4（W1/W2/W3 合入后启用对应断言组）
+python tests/cli_e2e.py            # L4（W1/W2/W3 合入后启用对应断言组；P1/2026-11-18 收口轮落地）
 python tests/local_real_diff.py …  # R（本地可选，哈希门禁）
 ```
 
@@ -213,8 +213,8 @@ python tests/local_real_diff.py …  # R（本地可选，哈希门禁）
 5. 任何「通过」表述须可复验：命令 + 日期 + 计数；SKIPPED 永远单列。
 
 **测试系统落地验收（随 M0–M3 逐包勾选）**：
-- [ ] L1：P1–P6 变形律、位翻转、边界值矩阵、截断扫描（全 fixture）落地并绿
-- [ ] L4：S1/S2/S3 + 安全拒绝语料 + 退出码矩阵全绿；记录行/JSON 契约断言生效
-- [ ] L5：错误簿记 10/10；双目标 diff=0；变异自检 3/3 变红后复绿
-- [ ] R：哈希门禁拒绝错误样本演示一次；真实样本结论未进入通过计数
+- [~] L1：P1–P6 变形律、位翻转、边界值矩阵、截断扫描（全 fixture）落地并绿（P1–P4/P6 + 位翻转/边界值/截断扫描已绿；P5 签名块位移不变性收口轮 P3 落地，见 `l1_property_test.mbt`）
+- [ ] L4：S1/S2/S3 + 安全拒绝语料 + 退出码矩阵全绿；记录行/JSON 契约断言生效（收口轮 P1，`tests/cli_e2e.py`）
+- [ ] L5：错误簿记 10/10；双目标 diff=0；变异自检 3/3 变红后复绿（收口轮 P2，`tools/parity-check.ps1` / `tools/mutation-sanity.ps1`）
+- [ ] R：哈希门禁拒绝错误样本演示一次；真实样本结论未进入通过计数（收口轮 P3，`tests/local_real_diff.py`）
 - [x] 覆盖矩阵 §6.1 中所有「待建/缺口」项随 W1–W8 合入转为已覆盖或显式 SKIPPED（F12 已随 W6 落地（2026-11-18）：RSA 真验签 186/186 全绿，ECDSA `#skip`；apksigner oracle 已实跑 3 真 + 3 篡改 6/6 AGREE，M6-6 的 SKIPPED 已被覆盖）
