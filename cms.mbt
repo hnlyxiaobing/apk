@@ -155,7 +155,7 @@ fn verify_v1_signer_info(
             qx,
             qy,
             si.signature,
-            big_from_be_bytes(digest),
+            ec_hash_to_e(digest, params.n),
             si.digest_alg,
           )
           if ok {
@@ -172,7 +172,7 @@ fn verify_v1_signer_info(
             qx,
             qy,
             si.signature,
-            big_from_be_bytes(digest),
+            ec_hash_to_e(digest, params.n),
             si.digest_alg,
           )
           if ok {

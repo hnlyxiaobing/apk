@@ -384,8 +384,43 @@ fn ec_jac_to_affine(pt : EcJacobian, params : EcParams) -> EcPoint? {
 // ---------------------------------------------------------------------------
 
 ///|
+/// ECDSA 消息哈希 → 整数 e（FIPS 186-4 / RFC 6979 口径）。
+///
+/// 若哈希位长超过曲线阶 n 的位长，取哈希**最左侧** `n_bits` 位（即右移
+/// `hash_bits - n_bits` 位）；否则整体转为整数。截断量按哈希字节长度计算，
+/// 而非整数的实际位长，因此哈希带前导零字节时仍与标准一致。
+fn ec_hash_to_e(digest : Bytes, n : BigInt) -> BigInt {
+  let hash_bits = digest.length() * 8
+  let n_bits = big_bit_length(n).to_int()
+  if hash_bits <= n_bits {
+    return big_from_be_bytes(digest)
+  }
+  let drop = hash_bits - n_bits
+  let byte_drop = drop / 8
+  let bit_drop = drop % 8
+  if bit_drop == 0 {
+    return big_from_be_bytes(digest[byte_drop:].to_owned())
+  }
+  // 非字节对齐的右移（P-256/P-384 的 n 均为字节对齐，此分支为通用兜底）。
+  let out : Array[Byte] = []
+  let mut i = byte_drop
+  while i < digest.length() {
+    let hi = (digest[i].to_int() & 0xFF) >> bit_drop
+    let lo = if i + 1 < digest.length() {
+      ((digest[i + 1].to_int() & 0xFF) << (8 - bit_drop)) & 0xFF
+    } else {
+      0
+    }
+    out.push((hi | lo).to_byte())
+    i = i + 1
+  }
+  big_from_be_bytes(Bytes::from_array(out[:]))
+}
+
+///|
 /// ECDSA 验签原语：给定公钥点 (qx,qy)、消息哈希 e、签名 (r,s)，判验签是否通过。
 ///
+/// 「消息哈希 e」为按曲线阶位长截断后的整数（调用方应经 `ec_hash_to_e` 处理）。
 /// 步骤：`r,s ∈ [1,n-1]`（否则 false）；公钥点需在曲线上；`w = s^-1 mod n`；
 /// `u1 = e·w mod n`；`u2 = r·w mod n`；`(x1,y1) = u1·G + u2·Q`；
 /// `v = x1 mod n`；`v == r`。任一畸形输入均值化返回 false，不 panic。

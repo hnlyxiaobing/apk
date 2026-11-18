@@ -415,3 +415,38 @@ test "T-W6-EC-b-v2: 非 EC SPKI / 截断签名 / 篡改 r 一律 fail-closed" {
   ])
   assert_true(!ok2, msg="篡改 r 必须 fail-closed")
 }
+
+///|
+test "T-W6-EC-trunc: SHA-512 摘要按曲线阶位长左截断" {
+  // 64 字节摘要：前 32 字节任意，后 32 字节为 RFC 6979 A.2.5 的 e。
+  let e_hex = "af2bdbe1aa9b6ec1e2ade1d694f41fc71a831d0268e9891562113d8a62add1bf"
+  let prefix = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+  let digest = bytes_from_hex(prefix + e_hex)
+  // P-256：左截断 256 位 → 后 32 字节。
+  assert_eq(big_to_hex(ec_hash_to_e(digest, p256_params.n)), e_hex)
+  // P-384：左截断 384 位 → 丢弃前 16 字节，保留后 48 字节。
+  let expected_384 = big_to_hex(
+    big_from_be_bytes(
+      bytes_from_hex("00112233445566778899aabbccddeeff" + e_hex),
+    ),
+  )
+  assert_eq(big_to_hex(ec_hash_to_e(digest, p384_params.n)), expected_384)
+  // 前导零字节：截断量由哈希字节长度决定，不受整数实际位长影响。
+  let e_bytes = bytes_from_hex(e_hex)
+  let lz : Array[Byte] = []
+  for b in bytes_from_hex(prefix) {
+    lz.push(b)
+  }
+  lz.push(b'\x00')
+  for i = 0; i < 31; i = i + 1 {
+    lz.push(e_bytes[i])
+  }
+  let leading_zero = Bytes::from_array(lz[:])
+  let expected_lz = big_to_hex(
+    big_from_be_bytes(leading_zero[32:64].to_owned()),
+  )
+  assert_eq(big_to_hex(ec_hash_to_e(leading_zero, p256_params.n)), expected_lz)
+  // 哈希位长不超过 n 位时不截断（SHA-256 + P-384）。
+  let short = bytes_from_hex(e_hex)
+  assert_eq(big_to_hex(ec_hash_to_e(short, p384_params.n)), e_hex)
+}

@@ -212,7 +212,7 @@ fn verify_v2_signers(
                           params,
                           qx,
                           qy,
-                          big_from_be_bytes(digest),
+                          ec_hash_to_e(digest, params.n),
                           r,
                           sig_s,
                         ) {
