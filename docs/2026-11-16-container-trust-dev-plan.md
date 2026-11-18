@@ -1,6 +1,6 @@
 # apk 容器信任与功能补齐开发文档
 
-> 建立：2026-11-16 ｜ 状态：W1 ✓ W2 ✓ W3 ✓ W4 ✓ W5 ✓ W7 ✓ W8 ✓（M4，2026-11-17）｜ 适用仓库：本仓库（hnlyxiaobing/apk，独立自包含）
+> 建立：2026-11-16 ｜ 状态：W1 ✓ W2 ✓ W3 ✓ W4 ✓ W5 ✓ W7 ✓ W8 ✓（M4，2026-11-17）＋ W6 已裁决（仅 RSA 降级，M5 推进中 2026-11-18）｜ 适用仓库：本仓库（hnlyxiaobing/apk，独立自包含）
 > 配套文档：[2026-11-16-test-system-design.md](2026-11-16-test-system-design.md)（测试系统设计，工作包验收测试 ID 以 `T-` 开头者均出自该文档）
 > 本文所有「现状」结论均为 2026-11-16 对本仓库源码的实测核对，非转述历史文档。
 
@@ -192,7 +192,9 @@ pub fn Apk::verity(Self) -> VerityInfo? raise ApkError   // None = 无 verity �
 
 **验收**：T-W5-1 无 verity 块样本返回 None；T-W5-2 程序化构造合法 verity 块（自算根哈希）重算一致；T-W5-3 篡改任一内容块 → 重算不一致；T-W5-4 畸形块 raise 不 panic。
 
-### W6 公钥验签（P3/XL，立项须用户裁决）
+### W6 公钥验签（P3/XL，已裁决 2026-11-18：仅 RSA 降级立项）
+
+> **裁决结论（2026-11-18，方案 B）**：立项，但**降级为仅 RSA**。ECDSA P-256/P-384 挂起不实现，`crypto_verified` 对 ECDSA 恒 false（fail-closed），显式 `#skip` 缺口。里程碑序列据此裁剪：M6-1→M6-2→M6-4(RSA 分支)→M6-5→M6-6（仅 RSA 样本）；M6-3（ECDSA 原语）与 v2/v3/v3.1 的 ECDSA 分支移除出本轮范围，留作独立后续裁决点。
 
 **目标**：在**不改变任何既有语义**的前提下，新增真验签通道：v1 CMS/PKCS#7 SignedData 签名值验证 + v2/v3/v3.1 signer 签名值验证（RSA PKCS#1 v1.5 与 ECDSA P-256/P-384）。
 
@@ -220,7 +222,7 @@ pub fn Apk::verify_signatures(Self) -> Array[SignatureVerification] raise ApkErr
 - M6-5 v1 接入：CMS SignedData 的 signerInfo 签名值验证（复用 W3 DER 读取器）；
 - M6-6 与 `apksigner verify` 本地 oracle 差分（真/假样本各 ≥3，oracle 缺失显式 SKIPPED）。
 
-**风险与止损**：大数/曲线实现是安全敏感代码，侧信道不在本库威胁模型内（离线分析工具），但**正确性必须向量全覆盖**；任一里程碑向量不过即停，不得带病推进。若 M6-1/M6-3 超预算，可裁决降级为「仅 RSA」或「仅结构+证书事实（W3 已交付）」，`crypto_verified` 对未支持算法恒 false。
+**风险与止损**：大数/曲线实现是安全敏感代码，侧信道不在本库威胁模型内（离线分析工具），但**正确性必须向量全覆盖**；任一里程碑向量不过即停，不得带病推进。**已按方案 B 降级为仅 RSA**（2026-11-18 裁决）：ECDSA 曲线运算（M6-3）不实现，`crypto_verified` 对 ECDSA 恒 false，风险压缩至大数模幂 + RSA 原语一处。
 
 **验收**：T-W6-1 各算法 NIST/已知向量 100%；T-W6-2 apksigner 判 Verifies 的受控样本 `crypto_verified=true`；T-W6-3 篡改样本 false；T-W6-4 旧 API 行为逐字节回归零漂移；T-W6-5 不支持算法 fail-closed。
 
@@ -283,7 +285,7 @@ M1（第 2–3 日）    W1 批量完整性报告                  ← 首个能
 M2（第 4–6 日）    W2 内存防线 + W4 v1 SHA-512        ← 安全与摘要半环闭合
 M3（第 7–9 日）    W3 证书解析 + W7 黄金差分双轨       ← 合规初筛能力成型
 M4（当前）         W5 verity + W8 Dart 符号定位       ← 识别层纵深
-M5（裁决后另排）   W6 公钥验签 M6-1…M6-6            ← 独立立项，逐里程碑门禁
+M5（当前，2026-11-18）  W6 公钥验签·仅 RSA（M6-1…M6-2→M6-4→M6-5→M6-6）  ← 已裁决方案 B；ECDSA 分支挂起 #skip
 ```
 
 排序判据：先零风险文档、再安全缺口、再高价值低成本能力、最后安全敏感大工程。每个工作包独立提交（一个包 ≥1 条实质 commit），独立过五门禁，互不阻塞。

@@ -30,6 +30,7 @@
 - 容器层只产出 `Bytes` 与索引值（ADR-0003 主决策）；下游靠 Wire `Blob` 承接。
 - 2026-11-16 裁决：`resources.arsc` 完整展开的**语义归属判给外部 `axml` 库**；本库 `resource_table_full` / `parse_resources_arsc` 自本日起**冻结不再增强**（API 冻结语义禁止删除，保留兼容）；跨库展开一致性差分由外部组合层承担，不在本仓库范围（详见 `docs/2026-11-16-container-trust-dev-plan.md` W9）。
 - 2026-11-10 ELF 只读侦察以纯插入方式落地，不改原决策、`ApkError` 复用 `BadElf`。
+- 2026-11-18 裁决（W6）：公钥验签立项但降级为**仅 RSA**（方案 B）。`verify_signatures()` 新增承载真验签结论；ECDSA P-256/P-384 挂起 `#skip`，对 ECDSA 签名 `crypto_verified` 恒 false（fail-closed）；`signature_verified` 恒 false 语义永不改变（详见 `docs/2026-11-16-container-trust-dev-plan.md` W6）。
 - 唯一第三方依赖 `bobzhang/zip@0.1.2`（仅 deflate）；aapt2 在 1,028 个 local 头中 403 个写 1~3 B 裸填充，已规避并转永久回归。
 
 ## 3. 公开 API 索引（自动抽取 `pkg.generated.mbti` 的 `pub` 声明行；完整字段见快照）
@@ -97,7 +98,8 @@ pub(all) struct ZipEntryRef {
 
 ## 6. 风险与未决
 
-- 与 `axml` 的 `resources.arsc` 解析实现重复，尚未裁决去重方式。
+- `resources.arsc` 完整展开的**语义归属**已裁决判给外部 `axml` 库（见 §2 决策行）；本库 `resource_table_full` / `parse_resources_arsc` 冻结不再增强，无「未裁决去重」遗留。
+- `verify_signatures()`（W6，公钥验签）已于 2026-11-18 裁决立项，采用**仅 RSA 降级**（方案 B）：ECDSA 分支 `crypto_verified` 恒 false（fail-closed），`signature_verified` 恒 false 语义不变。
 - 第三方 APK 许可不明，禁止入库；受控自建样本与哈希登记见本仓库 `tests/fixtures/`。
 - `zip@0.1.2` 单人维护、star=0 的 bus factor 风险已登记，不阻断使用。
 
