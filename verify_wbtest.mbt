@@ -233,3 +233,299 @@ test "T-W6-RSA-v1: tampered JAR signature fails closed" {
   assert_true(v.structure_ok, msg="structure still parses")
   assert_true(!v.crypto_verified, msg="tampered signature fails verification")
 }
+
+// ---------------------------------------------------------------------------
+// W6 加固：新解析器（签名块 / CMS / SPKI / DER / 大数）畸形与位翻转语料。
+// 断言口径：白盒解析入口只允许「返回 Option/抛 ApkError」；绝不 panic。
+// ---------------------------------------------------------------------------
+
+///|
+/// 深拷贝后翻转第 `bit_index` 位；越界忽略。
+fn w6_flip_bit(src : Bytes, bit_index : Int32) -> Bytes {
+  let arr : Array[Byte] = []
+  for b in src {
+    arr.push(b)
+  }
+  let byte = bit_index / 8
+  let bit = bit_index % 8
+  if byte >= 0 && byte < arr.length() {
+    arr[byte] = (arr[byte].to_int() ^ (1 << bit)).to_byte()
+  }
+  Bytes::from_array(arr[:])
+}
+
+///|
+/// 小端读 u32（无符号解释）。
+fn w6_u32(b : Bytes, off : Int32) -> Int32 {
+  (b[off].to_int() & 0xFF) |
+  ((b[off + 1].to_int() & 0xFF) << 8) |
+  ((b[off + 2].to_int() & 0xFF) << 16) |
+  ((b[off + 3].to_int() & 0xFF) << 24)
+}
+
+///|
+/// 深拷贝后写入小端 u32。
+fn w6_set_u32(src : Bytes, off : Int32, v : Int32) -> Bytes {
+  let arr : Array[Byte] = []
+  for b in src {
+    arr.push(b)
+  }
+  arr[off] = (v & 0xFF).to_byte()
+  arr[off + 1] = ((v >> 8) & 0xFF).to_byte()
+  arr[off + 2] = ((v >> 16) & 0xFF).to_byte()
+  arr[off + 3] = ((v >> 24) & 0xFF).to_byte()
+  Bytes::from_array(arr[:])
+}
+
+///|
+/// 取 fixture 第一条签名记录的方案值字节（以 value 起始为 0）。
+fn w6_scheme_value(fixture : Bytes) -> (Bytes, SignatureScheme) raise ApkError {
+  let apk = Apk::open(fixture)
+  let recs = apk.collect_signature_records()
+  let rec = recs[0]
+  (
+    apk.source[rec.value_off:rec.value_off + rec.value_len].to_owned(),
+    rec.scheme,
+  )
+}
+
+///|
+/// 方案值内关键长度字段偏移：[seq, signer, sd, sigs, 首记录 rec, 首记录 sig_len, pk]。
+/// v3/v3.1 在 signed-data 之后多 8 字节 min/max SDK。
+fn w6_value_fields(v : Bytes, v3 : Bool) -> Array[Int32] {
+  let sd_end = 12 + w6_u32(v, 8)
+  let sigs_off = if v3 { sd_end + 8 } else { sd_end }
+  let rec_off = sigs_off + 4
+  [0, 4, 8, sigs_off, rec_off, rec_off + 8, sigs_off + 4 + w6_u32(v, sigs_off)]
+}
+
+///|
+/// `extract_scheme_verify` 是否以 `ApkError` 结束。
+fn w6_extract_raises(v : Bytes, scheme : SignatureScheme) -> Bool {
+  let mut raised = false
+  try ignore(extract_scheme_verify(v, 0, v.length(), 0, scheme)) catch {
+    _ => raised = true
+  } noraise {
+    _ => ()
+  }
+  raised
+}
+
+///|
+test "W6 malformed: v2/v3/v3.1 签名块长度字段越界与截断一律 fail-closed" {
+  let cases : Array[(Bytes, Bool)] = [
+    (fixture_apk_v2_ok(), false),
+    (fixture_apk_v3_ok(), true),
+    (fixture_apk_v31_ok(), true),
+  ]
+  for pair in cases {
+    let (fixture, v3) = pair
+    let (v, scheme) = w6_scheme_value(fixture)
+    let f = w6_value_fields(v, v3)
+    // 0=seq, 1=signer, 2=sd, 3=sigs, 4=rec, 6=pk：越界长度必须报错。
+    for idx in [0, 1, 2, 3, 4, 6] {
+      for bad in [-1, 0x7FFFFFFF] {
+        assert_true(
+          w6_extract_raises(w6_set_u32(v, f[idx], bad), scheme),
+          msg="字段 \{idx} 置 0x\{bad} 应报 ApkError",
+        )
+      }
+    }
+    // sig_len 越过 rec_len - 8。
+    assert_true(
+      w6_extract_raises(w6_set_u32(v, f[5], -1), scheme),
+      msg="sig_len 越界应报 ApkError",
+    )
+    // 负偏移语义（0x80000000 视作 uint 高位）同样拒绝。
+    assert_true(
+      w6_extract_raises(w6_set_u32(v, f[2], 0x80000000), scheme),
+      msg="sd_len 高位污染应报 ApkError",
+    )
+    // 逐点截断（完整长度除外）。
+    for
+      n in [
+        0,
+        1,
+        3,
+        4,
+        7,
+        8,
+        11,
+        f[3],
+        f[3] + 4,
+        f[4] + 4,
+        f[6],
+        f[6] + 4,
+        v.length() - 1,
+      ] {
+      if n > 0 && n < v.length() {
+        assert_true(
+          w6_extract_raises(v[0:n].to_owned(), scheme),
+          msg="截断到 \{n} 字节应报 ApkError",
+        )
+      }
+    }
+  }
+}
+
+///|
+test "W6 malformed: v3 min/max SDK 缺失报错" {
+  let (v, scheme) = w6_scheme_value(fixture_apk_v3_ok())
+  let f = w6_value_fields(v, true)
+  // signer 内容从偏移 8 起；令 signer_end 恰为 sd_end + 4（只剩 minSDK 半截）。
+  let signer_len = f[3] - 12
+  assert_true(
+    w6_extract_raises(w6_set_u32(v, 4, signer_len), scheme),
+    msg="min/max SDK 不足应报 BadSigningBlock",
+  )
+}
+
+///|
+test "W6 malformed: v2/v3/v3.1 方案值全位翻转不 panic" {
+  let cases : Array[(Bytes, Bool)] = [
+    (fixture_apk_v2_ok(), false),
+    (fixture_apk_v3_ok(), true),
+    (fixture_apk_v31_ok(), true),
+  ]
+  for pair in cases {
+    let (fixture, _) = pair
+    let (v, scheme) = w6_scheme_value(fixture)
+    let mut rejected = 0
+    let mut accepted = 0
+    for i in 0..<(v.length() * 8) {
+      let m = w6_flip_bit(v, i)
+      let mut ok = false
+      try {
+        let signers = extract_scheme_verify(m, 0, m.length(), 0, scheme)
+        ok = true
+        for s in signers {
+          ignore(rsa_public_key_from_spki(s.public_key))
+        }
+      } catch {
+        _ => rejected = rejected + 1
+      } noraise {
+        _ => ()
+      }
+      if ok {
+        accepted = accepted + 1
+      }
+    }
+    assert_true(rejected > 0, msg="长度/结构字段翻转应有拒绝")
+    assert_true(accepted > 0, msg="载荷字节翻转仍可结构解析")
+  }
+}
+
+///|
+test "W6 malformed: v1 CMS SignedData 全位翻转与前缀截断不 panic" {
+  let apk = Apk::open(fixture_apk_v1_ok())
+  let der = apk.safe_entry("META-INF/TEST.RSA").unwrap()
+  let mut parsed = 0
+  let mut rejected = 0
+  for i in 0..<(der.length() * 8) {
+    match cms_signer_infos(w6_flip_bit(der, i)) {
+      Some(_) => parsed = parsed + 1
+      None => rejected = rejected + 1
+    }
+  }
+  assert_true(parsed > 0, msg="载荷位翻转仍可能解析")
+  assert_true(rejected > 0, msg="长度/结构位翻转应拒绝")
+  for n in [0, 1, 2, 3, 4, 8, 16, 64, 256, der.length() - 1] {
+    if n >= 0 && n < der.length() {
+      ignore(cms_signer_infos(der[0:n].to_owned()))
+    }
+  }
+}
+
+///|
+test "W6 malformed: X.509 SPKI 位翻转/截断/非 RSA 一律拒绝且不 panic" {
+  let apk = Apk::open(fixture_apk_v1_ok())
+  let der = apk.safe_entry("META-INF/TEST.RSA").unwrap()
+  let certs = pkcs7_certificates(der)
+  assert_true(certs.length() > 0, msg="CMS 内含证书")
+  let cert = certs[0]
+  let mut rejected = 0
+  for i in 0..<(cert.length() * 8) {
+    match x509_spki(w6_flip_bit(cert, i)) {
+      Some(spki) => ignore(rsa_public_key_from_spki(spki))
+      None => rejected = rejected + 1
+    }
+  }
+  assert_true(rejected > 0, msg="结构位翻转应拒绝")
+  for n in [0, 4, 8, 16, 64, cert.length() - 1] {
+    if n >= 0 && n < cert.length() {
+      ignore(x509_spki(cert[0:n].to_owned()))
+    }
+  }
+  // 非 RSA（EC P-256）算法标识：必须拒绝。
+  let ec = bytes_from_hex("3013300b06072a8648ce3d02010500030400aabbcc")
+  assert_true(rsa_public_key_from_spki(ec) is None, msg="EC SPKI 应拒绝")
+  // RSA OID 但 BIT STRING 为空：拒绝。
+  let empty_bits = bytes_from_hex("3011300d06092a864886f70d010101050003020000")
+  assert_true(
+    rsa_public_key_from_spki(empty_bits) is None,
+    msg="空 BIT STRING 应拒绝",
+  )
+  // RSA OID 但 BIT STRING 未用位非零：拒绝。
+  let bad_unused = bytes_from_hex("3011300d06092a864886f70d010101050003020500")
+  assert_true(
+    rsa_public_key_from_spki(bad_unused) is None,
+    msg="未用位非零应拒绝",
+  )
+  // 全零 / 空输入：拒绝。
+  assert_true(rsa_public_key_from_spki(b"") is None)
+  assert_true(
+    rsa_public_key_from_spki(b"\x00\x00\x00\x00\x00\x00\x00\x00") is None,
+  )
+}
+
+///|
+test "W6 malformed: 签名长度与模数长度不一致一律拒绝" {
+  let n = big_from_hex(
+    "bdb9b10875ef349fd79af60d8f28bc4625a2afa41591cf7cfd0d246785eaa64b809005eca281447b28cd66142f07ba4e19691e4f52ea86021f470c3e0f613ca84b8465c3c652548d02e87357bf648115267f4433364e1ceee47a665efd7b91d54ac8fb2f06d1c8b95f4d8dca68718c47b548a1cfb6d4ab63c0adace0de4f29ad",
+  )
+  let key = rsa_key(n, big_from_hex("10001"))
+  let digest = big_from_hex(
+    "933c6d9895b9114f71805f661c2e567039a03f13827a35c723a23a1936b2da61",
+  )
+  let digest_bytes = big_to_be_bytes(digest)
+  let nbytes = big_to_be_bytes(key.n).length()
+  for len in [0, 1, nbytes - 1, nbytes + 1] {
+    let sig = Bytes::from_array(Array::make(len, b'\x01')[:])
+    assert_true(
+      !rsa_verify_pkcs1(key, sig, digest_bytes, "SHA-256"),
+      msg="PKCS#1 长度 \{len} ≠ 模数长度应拒绝",
+    )
+    assert_true(
+      !rsa_verify_pss(key, sig, digest_bytes, "SHA-256"),
+      msg="PSS 长度 \{len} ≠ 模数长度应拒绝",
+    )
+  }
+  // 签名值 ≥ 模数：拒绝（不做模幂）。
+  let too_big = Bytes::from_array(Array::make(nbytes, b'\xff')[:])
+  assert_true(!rsa_verify_pkcs1(key, too_big, digest_bytes, "SHA-256"))
+  assert_true(!rsa_verify_pss(key, too_big, digest_bytes, "SHA-256"))
+}
+
+///|
+test "W6 malformed: DER INTEGER 与大数边界输入不 panic" {
+  // 空 INTEGER 内容 → 0。
+  assert_true(big_is_zero(big_from_der_integer(b"", 0, 0)))
+  // 单个 0x00 → 0（长度 1 不剥离前导零）。
+  assert_true(big_is_zero(big_from_der_integer(b"\x00", 0, 1)))
+  // 双 0x00 → 0。
+  assert_true(big_is_zero(big_from_der_integer(b"\x00\x00", 0, 2)))
+  // 全 0xFF 按无符号解释（不视为负数），不 panic。
+  let v = big_from_der_integer(b"\xff\xff\xff\xff", 0, 4)
+  assert_eq(big_bit_length(v), 32)
+  // 单字节所有取值往返。
+  for i in 0..<256 {
+    let b = Bytes::from_array([i.to_byte()])
+    let x = big_from_der_integer(b, 0, 1)
+    let round = big_to_be_bytes(x)
+    assert_true(round.length() >= 1, msg="往返字节非空")
+  }
+  // 空输入大数：0 位长、单字节大端表示。
+  let z = big_from_be_bytes(b"")
+  assert_true(big_is_zero(z))
+  assert_eq(big_to_be_bytes(z).length(), 1)
+}

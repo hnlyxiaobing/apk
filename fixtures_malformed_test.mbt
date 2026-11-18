@@ -245,3 +245,201 @@ test "apk malformed: 多 dex APK 截断与目录污染报错且不 panic" {
     msg="CD 偏移越界应报 BadCentralDirectory",
   )
 }
+
+// ---------------------------------------------------------------------------
+// W6 加固：APK Signing Block / v1 CMS 块畸形语料（真实样本一线）。
+// 断言口径：`verify_signatures()` 只能抛 ApkError 或 crypto_verified=false；
+// 未变异基线必须验签通过（防止「全 false 假绿」）。
+// ---------------------------------------------------------------------------
+
+///|
+/// 签名块范围：返回 (block_start, pairs_end)；解析不出返回 (-1, -1)。
+fn w6_blk_span(src : Bytes) -> (Int32, Int32) {
+  let eocd = fx_find_eocd(src)
+  if eocd < 0 {
+    return (-1, -1)
+  }
+  let cd = fx_u32(src, eocd + 16)
+  if cd < 24 {
+    return (-1, -1)
+  }
+  let size = fx_u32(src, cd - 24)
+  (cd - size - 8, cd - 24)
+}
+
+///|
+/// 按 ID 查签名块 value：返回 (value_off, value_len)；找不到 (-1, -1)。
+fn w6_blk_find(src : Bytes, id : Int32) -> (Int32, Int32) {
+  let span = w6_blk_span(src)
+  let mut pos = span.0 + 8
+  let mut found : (Int32, Int32) = (-1, -1)
+  while span.0 >= 0 && pos + 12 <= span.1 && found.0 < 0 {
+    let len = fx_u32(src, pos)
+    if fx_u32(src, pos + 8) == id {
+      found = (pos + 12, len - 4)
+    }
+    pos = pos + 8 + len
+  }
+  found
+}
+
+///|
+/// `verify_signatures()` 是否 fail-closed（抛 ApkError 或 crypto 全 false）。
+fn w6_verify_fail_closed(src : Bytes) -> Bool {
+  let mut ok = true
+  try {
+    let apk = @apk.Apk::open(src)
+    for c in apk.verify_signatures() {
+      if c.crypto_verified {
+        ok = false
+      }
+    }
+  } catch {
+    _ => ()
+  } noraise {
+    _ => ()
+  }
+  ok
+}
+
+///|
+/// 方案枚举相等（枚举未派生 Eq，此处显式匹配）。
+fn w6_same_scheme(a : @apk.SignatureScheme, b : @apk.SignatureScheme) -> Bool {
+  match (a, b) {
+    (@apk.SignatureScheme::V1, @apk.SignatureScheme::V1) => true
+    (@apk.SignatureScheme::V2, @apk.SignatureScheme::V2) => true
+    (@apk.SignatureScheme::V3, @apk.SignatureScheme::V3) => true
+    (@apk.SignatureScheme::V31, @apk.SignatureScheme::V31) => true
+    _ => false
+  }
+}
+
+///|
+/// 指定方案是否 fail-closed（抛 ApkError / 缺该方案 / 该方案 crypto=false）。
+/// 多方案样本中只变异某一方案时，其他方案仍可验签，故按方案断言。
+fn w6_verify_scheme_fail_closed(
+  src : Bytes,
+  scheme : @apk.SignatureScheme,
+) -> Bool {
+  let mut ok = true
+  try {
+    let apk = @apk.Apk::open(src)
+    for c in apk.verify_signatures() {
+      if w6_same_scheme(c.scheme, scheme) && c.crypto_verified {
+        ok = false
+      }
+    }
+  } catch {
+    _ => ()
+  } noraise {
+    _ => ()
+  }
+  ok
+}
+
+///|
+test "apk malformed: v2/v3 签名块长度字段污染与截断 fail-closed（真实样本）" {
+  let src = fixture_fx_multidex_v2v3_apk()
+  // 基线校准：未变异样本必须可验签，否则「全 false」断言无意义。
+  let base = @apk.Apk::open(src).verify_signatures()
+  assert_true(base.length() > 0, msg="基线含签名方案")
+  assert_true(base[0].crypto_verified, msg="基线验签通过")
+  for
+    entry in [
+      (0x7109871a, @apk.SignatureScheme::V2),
+      (0xf05368c0, @apk.SignatureScheme::V3),
+    ] {
+    let (id, scheme) = entry
+    let value = w6_blk_find(src, id)
+    assert_true(value.0 > 0, msg="找到签名方案 \{id}")
+    let vo = value.0
+    // seq_len / signer_len / sd_len 越界污染（只影响该方案）。
+    for delta in [0, 4, 8] {
+      for bad in [-1, 0x7FFFFFFF] {
+        assert_true(
+          w6_verify_scheme_fail_closed(fx_set_u32(src, vo + delta, bad), scheme),
+          msg="value+\{delta} 置 0x\{bad} 应 fail-closed",
+        )
+      }
+    }
+    // value 头部采样位翻转（长度字段/签名载荷密集区）。
+    for i in 0..<24 {
+      assert_true(
+        w6_verify_scheme_fail_closed(fx_xor(src, vo + i, b'\x01'), scheme),
+        msg="value+\{i} 位翻转应 fail-closed",
+      )
+    }
+    // 签名块内截断（影响整个容器，全部方案 fail-closed）。
+    let span = w6_blk_span(src)
+    for cut in [span.0 + 8, vo + 1, vo + 3] {
+      if cut > 0 && cut < src.length() {
+        assert_true(
+          w6_verify_fail_closed(fx_cut(src, cut)),
+          msg="截断到 \{cut} 字节应 fail-closed",
+        )
+      }
+    }
+  }
+}
+
+///|
+/// 重建含指定 `.RSA` 块的 v1 APK（其余条目字节不变，保持摘要链）。
+fn w6_v1_with_rsa(base : Array[ZSpec], der : Bytes) -> Bytes {
+  let specs : Array[ZSpec] = []
+  for s in base {
+    specs.push(s)
+  }
+  specs.push(zspec("META-INF/FXKEY.RSA", der))
+  build_zip(specs, None)
+}
+
+///|
+test "apk malformed: v1 CMS 块截断/长度污染/位翻转 fail-closed（真实样本重建）" {
+  let apk = @apk.Apk::open(fixture_fx_multidex_v1_apk())
+  let base : Array[ZSpec] = []
+  for
+    n in [
+      "AndroidManifest.xml", "resources.arsc", "classes.dex", "classes2.dex", "META-INF/MANIFEST.MF",
+      "META-INF/FXKEY.SF",
+    ] {
+    base.push(zspec(n, apk.entry(n)))
+  }
+  let der = apk.entry("META-INF/FXKEY.RSA")
+  // 基线校准：重建后的 APK 必须仍可验签（只替换同一 .RSA 字节）。
+  let rebuilt = w6_v1_with_rsa(base, der)
+  let checks = @apk.Apk::open(rebuilt).verify_signatures()
+  assert_true(checks.length() > 0, msg="重建样本含 v1 方案")
+  assert_true(checks[0].crypto_verified, msg="重建基线验签通过")
+  // 截断。
+  for cut in [0, 1, 4, 10, 100, der.length() / 2, der.length() - 1] {
+    if cut >= 0 && cut < der.length() {
+      assert_true(
+        w6_verify_fail_closed(w6_v1_with_rsa(base, fx_cut(der, cut))),
+        msg="CMS 截断到 \{cut} 应 fail-closed",
+      )
+    }
+  }
+  // DER 长长度字段（30 82 xx xx）污染。
+  let mut hits = 0
+  for i in 0..<(der.length() - 2) {
+    if der[i] == b'\x30' && der[i + 1] == b'\x82' && hits < 6 {
+      assert_true(
+        w6_verify_fail_closed(w6_v1_with_rsa(base, fx_mut(der, i + 2, b'\xff'))),
+        msg="DER 长度 @\{i + 2} 污染应 fail-closed",
+      )
+      hits = hits + 1
+    }
+  }
+  assert_true(hits > 0, msg="样本含 30 82 长长度字段")
+  // DER 头部采样位翻转：证书区/算法标识不参与 signerInfo 签名，只断言不 panic。
+  for i in 0..<48 {
+    ignore(w6_verify_fail_closed(w6_v1_with_rsa(base, fx_xor(der, i, b'\x01'))))
+  }
+  // 末尾 encryptedDigest 区位翻转：CMS 签名值必须验证失败。
+  for i in (der.length() - 32)..<der.length() {
+    assert_true(
+      w6_verify_fail_closed(w6_v1_with_rsa(base, fx_xor(der, i, b'\x01'))),
+      msg="CMS 签名区 @\{i} 位翻转应 fail-closed",
+    )
+  }
+}
