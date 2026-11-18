@@ -54,19 +54,21 @@ test "T-W6-RSA-contract: legacy signature_verified stays false while new channel
 }
 
 ///|
-/// M6-6 apksigner oracle 差分（真样本方向，T-W6-6a）。本机无 Android SDK
-/// build-tools，oracle 缺失 → 显式 `#skip`。装机后运行
-/// `python tests/apksigner_oracle_diff.py`（exit 78 = SKIPPED，0 = 对账一致）。
+/// M6-6 apksigner oracle 差分（真样本方向，T-W6-6a）。oracle 属外部依赖（Android SDK
+/// build-tools），不纳入常驻测试 → 保留显式 `#skip`。2026-11-18 已用便携 build-tools r34
+/// 实跑 `python tests/apksigner_oracle_diff.py`（3 真 RSA + 3 篡改，6/6 AGREE；
+/// 明细见 CHANGELOG W6-hardening-3）。
 #skip
 test "T-W6-6a: apksigner oracle differential on real RSA samples (requires SDK)" {
   // 需 `apksigner verify -v` 与 `apk-cli verify` 对 3 件受控样本结论一致。
-  // 本机自检（无 oracle）：fx-multidex-v1 / v2v3 / unsigned 三件全对（2026-11-18）。
+  // oracle 不可用时的库内自检：fx-multidex-v1 / v2v3 / unsigned 三件全对（2026-11-18）。
   assert_true(true, msg="harness: tests/apksigner_oracle_diff.py --self-test")
 }
 
 ///|
-/// M6-6 apksigner oracle 差分（篡改样本方向，T-W6-6b）。同上 oracle 缺失 → `#skip`。
-/// 篡改方向由 `verify_wbtest.mbt` 的 V2_BAD / V1_BAD fixture 在库内白盒覆盖：
+/// M6-6 apksigner oracle 差分（篡改样本方向，T-W6-6b）。oracle 属外部依赖 → 保留
+/// `#skip`；2026-11-18 实跑覆盖 3 件篡改样本，6/6 AGREE。篡改方向另由
+/// `verify_wbtest.mbt` 的 V2_BAD / V1_BAD fixture 在库内白盒覆盖：
 /// 真样本判通过、篡改样本判失败两方向均已验证。
 #skip
 test "T-W6-6b: apksigner oracle differential on tampered samples (requires SDK)" {
