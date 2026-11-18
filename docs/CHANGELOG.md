@@ -327,3 +327,18 @@
 ### 门禁
 
 `moon check --deny-warn` / `moon build` / `moon test`（187/187 全绿，8 个 `#skip` 测试块显式单列不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — 后续立项草案登记（纯文档，ECDSA 真验签 + verity 树重算）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | 为两个文档化挂起缺口起草解除路径草案：W5-后续 verity 树重算、W6-后续 ECDSA P-256/P-384 真验签 |
+| 新增 pub 声明 | **无**（纯文档，`pkg.generated.mbti` 零 diff） |
+| 快照 diff 结论 | **零 diff** |
+| 改动 | dev-plan §3.W5 验收后追加「W5-后续：verity 树重算落地草案」（前置依赖 = AOSP fs-verity 块内布局核实；未核实前不立项）；§3.W6 已知限制后追加「W6-后续：ECDSA P-256/P-384 真验签立项草案」（前提 = 决策层确认范围 + 纯自研 secp256r1/384r1 曲线原语）；§4 里程碑表末尾登记两条草案为「待裁决，未立项」 |
+| 性质 | 草案不构成立项、不改任何代码/测试/`#skip`；仅把 `#skip` 缺口的解除路径、验收草案、风险止损、门禁现实成文，供后续裁决 |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（187/187 全绿）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
