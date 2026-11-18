@@ -22,6 +22,29 @@
 - 「来源待核」= 现有真实形态样本，来源未核实；**不追认为自产**，在来源核实前仅用于既有 L2 受控差分，不扩大其用途。
 - W7 轨 A 的 `w7-arm64-v8a.so` / `w7-libs.apk` 由 `tests/fixtures/gen_elf_fixtures.py` 确定性合成（纯 Python 手工字节，无工具链依赖），Apache-2.0，可复现；嵌入在 `w7_test.mbt` 的内嵌字节与其逐字节一致。
 
+## W6 inline 签名样本（`verify_wbtest.mbt` 内嵌，2026-11-18 实测 11 件）
+
+> 这些样本不是独立文件，而是以十六进制内嵌在 `verify_wbtest.mbt` 的
+> `fixture_apk_*()` 中；下表哈希对「字节串本身」计算，口径为内嵌字节。
+> 生成器：`tests/fixtures/gen_w6_fixtures.py`（Python 标准库 + `cryptography`，
+> 固定测试私钥 `TEST_KEY_PEM`，确定性；PSS 使用固定 salt = hLen）。
+> 校验命令：`python tests/fixtures/gen_w6_fixtures.py --check verify_wbtest.mbt`
+> （逐字节一致才返回 0）。来源口径：**受控自建**（Apache-2.0，可复现）。
+
+| 名称（inline 函数） | SHA-256 | 大小 (B) |
+|---|---|---|
+| `fixture_apk_v2_ok` | `e55fced1cf9732a1fbc70c4dc36805f6a74095ee97317c9c246632cc15007554` | 1435 |
+| `fixture_apk_v2_bad` | `4978a441c2c3bc0f9840bbd052d2e3c95d55ae0ee173dc30c3f83f11c2855eca` | 1435 |
+| `fixture_apk_v2_pss256` | `487db2cddf45fa0c330b2a27d152f2c8ab01e771c758cc693a2bae8287f5cd4d` | 1435 |
+| `fixture_apk_v2_pss512` | `b06a88065ed1f769af7855b90755c687d7d6f28ceb745e0f9e4a137d8b79b0e6` | 1467 |
+| `fixture_apk_v2_sha512` | `b34d81a5cd394eba099f0f608432064ef02696ac5fe0bdde5e015529ed3ecdf6` | 1467 |
+| `fixture_apk_v3_ok` | `37989ecb4b5275ca91683dfe8c60eee3ea95ebe67bdd59bbf0c13c2272796ba5` | 1443 |
+| `fixture_apk_v31_ok` | `e1378c4de7bde5d8d0938f260b06575c189f28a71497874edf47ce350c75bcd2` | 1443 |
+| `fixture_apk_ecdsa` | `b7546823180e5b890788f63b5f6d5ae6190a953191b9f9fd27ae70a8e6ae7d46` | 1307 |
+| `fixture_apk_v1_ok` | `a9de89f18334742fbc929484380b41574016c1292e7570f48b667523177977c9` | 2102 |
+| `fixture_apk_v1_bad` | `fc2446062b6a0564086ec846727faf77d0abab8c857abaf04079a225690d2a29` | 2102 |
+| `fixture_apk_v1_noattr` | `a6ea6f4a2dabdb5af46d5b355a57a1e957bf8e8d33bd29f6a034c1b7c4f7abdc` | 1931 |
+
 ## 变更规则
 
 1. 新增 fixture 必须先核来源、再登记哈希，与黄金记录同提交。
