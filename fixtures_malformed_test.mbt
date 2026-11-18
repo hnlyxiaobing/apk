@@ -443,3 +443,95 @@ test "apk malformed: v1 CMS 块截断/长度污染/位翻转 fail-closed（真�
     )
   }
 }
+
+// ---------------------------------------------------------------------------
+// W6 加固：模数规模上限（≤ 8192 位）——攻击者可控超大模数的 DoS 面收敛。
+// ---------------------------------------------------------------------------
+
+///|
+/// DER TLV（长度编码支持 0x80..0xFFFFFF）。
+fn w6_der(tag : Int32, content : Bytes) -> Bytes {
+  let out : Array[Byte] = [tag.to_byte()]
+  let n = content.length()
+  if n < 0x80 {
+    out.push(n.to_byte())
+  } else if n <= 0xFF {
+    out.push(b'\x81')
+    out.push(n.to_byte())
+  } else if n <= 0xFFFF {
+    out.push(b'\x82')
+    out.push((n >> 8).to_byte())
+    out.push((n & 0xFF).to_byte())
+  } else {
+    out.push(b'\x83')
+    out.push((n >> 16).to_byte())
+    out.push(((n >> 8) & 0xFF).to_byte())
+    out.push((n & 0xFF).to_byte())
+  }
+  push_bytes(out, content)
+  Bytes::from_array(out[:])
+}
+
+///|
+/// 以给定模数内容构造 RSA SPKI（e = 65537）。
+fn w6_rsa_spki(modulus : Bytes) -> Bytes {
+  let rsa : Array[Byte] = []
+  push_bytes(rsa, w6_der(0x02, modulus))
+  push_bytes(rsa, w6_der(0x02, b"\x01\x00\x01"))
+  let bits : Array[Byte] = [b'\x00']
+  push_bytes(bits, w6_der(0x30, Bytes::from_array(rsa[:])))
+  let body : Array[Byte] = []
+  push_bytes(
+    body, b"\x30\x0d\x06\x09\x2a\x86\x48\x86\xf7\x0d\x01\x01\x01\x05\x00",
+  )
+  push_bytes(body, w6_der(0x03, Bytes::from_array(bits[:])))
+  w6_der(0x30, Bytes::from_array(body[:]))
+}
+
+///|
+/// v2 方案值：空摘要/空证书 + 一条 RSA PKCS#1(SHA-256) 签名记录（1 字节占位）+ 公钥。
+fn w6_v2_value(pk : Bytes) -> Bytes {
+  let sd : Array[Byte] = []
+  push_u32(sd, 0)
+  push_u32(sd, 0)
+  push_u32(sd, 0)
+  let sigrec : Array[Byte] = []
+  push_u32(sigrec, 9)
+  push_u32(sigrec, 0x0103)
+  push_u32(sigrec, 1)
+  push_bytes(sigrec, b"\x00")
+  let signer : Array[Byte] = []
+  push_u32(signer, sd.length())
+  push_bytes(signer, Bytes::from_array(sd[:]))
+  push_u32(signer, sigrec.length())
+  push_bytes(signer, Bytes::from_array(sigrec[:]))
+  push_u32(signer, pk.length())
+  push_bytes(signer, pk)
+  let value : Array[Byte] = []
+  push_u32(value, signer.length() + 4)
+  push_u32(value, signer.length())
+  push_bytes(value, Bytes::from_array(signer[:]))
+  Bytes::from_array(value[:])
+}
+
+///|
+test "apk hardening: 超大模数 fail-closed 且 detail=key too large" {
+  // 65544 位模数（8193 字节全 0xFF）；若无上限，模幂不可完成。
+  let mod : Array[Byte] = []
+  for i = 0; i < 8193; i = i + 1 {
+    mod.push(b'\xff')
+  }
+  let pk = w6_rsa_spki(Bytes::from_array(mod[:]))
+  let value = w6_v2_value(pk)
+  let apk_bytes = build_zip(
+    [zspec("AndroidManifest.xml", b"\x03\x00\x08\x00")],
+    Some(sig_block_of([(0x7109871aU, value)])),
+  )
+  let apk = @apk.Apk::open(apk_bytes)
+  let checks = apk.verify_signatures()
+  assert_eq(checks.length(), 1)
+  assert_true(checks[0].scheme is @apk.SignatureScheme::V2)
+  assert_true(checks[0].structure_ok, msg="signer 结构可解析")
+  assert_true(!checks[0].crypto_verified, msg="超限模数必须 fail-closed")
+  assert_eq(checks[0].detail, "key too large")
+}

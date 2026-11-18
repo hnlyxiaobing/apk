@@ -10,13 +10,25 @@
 ///
 /// 语义：验签成功 = 签名值在模幂后以 PKCS#1 v1.5 正确填充且 DigestInfo（含 OID 与
 /// 摘要）逐字节一致。**不**做 CRT/私钥/侧信道（离线分析工具，非实时验签服务）。
-/// 边界：模数长度上限即大数 limb 规模（2048/4096 位可承载，分析工具口径）。
+/// 边界：模数 bit 长硬上限 8192（见 `rsa_max_modulus_bits`）；超限一律 fail-closed，
+/// 不进入模幂，避免攻击者可控的超大模数放大计算量（对齐 W2 内存有界口径）。
 
 ///|
 /// RSA 公钥：模数 n（大数）+ 指数 e（大数）。仅验签用途。
 priv struct RsaPublicKey {
   n : BigInt
   e : BigInt
+}
+
+///|
+/// 模数 bit 长硬上限（对齐 W2 内存有界口径）：2048/4096/8192 位均可用，超过 8192
+/// 位则 fail-closed，不执行模幂。
+let rsa_max_modulus_bits : Int32 = 8192
+
+///|
+/// 模数是否超过硬上限；超限时验签直接判失败（值化返回，不抛错）。
+fn rsa_key_too_large(key : RsaPublicKey) -> Bool {
+  big_bit_length(key.n) > rsa_max_modulus_bits
 }
 
 ///|
@@ -111,6 +123,9 @@ fn rsa_verify_pkcs1(
   if big_is_zero(key.n) || big_is_zero(key.e) {
     return false
   }
+  if rsa_key_too_large(key) {
+    return false
+  }
   let modulus_bytes = big_to_be_bytes(key.n)
   let nbytes = modulus_bytes.length()
   // 签名必须正好等于模数长度（PKCS#1 要求）。
@@ -201,6 +216,9 @@ fn rsa_verify_pss(
   hash_name : String,
 ) -> Bool {
   if big_is_zero(key.n) || big_is_zero(key.e) {
+    return false
+  }
+  if rsa_key_too_large(key) {
     return false
   }
   let h_len = msg_digest.length()

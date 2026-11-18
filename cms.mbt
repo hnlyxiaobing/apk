@@ -48,6 +48,9 @@ fn verify_v1_signer_info(
     None =>
       return (false, "unsupported", "v1 signerInfo: certificate key is not RSA")
   }
+  if rsa_key_too_large(key) {
+    return (false, "unsupported", "v1 signerInfo: key too large")
+  }
   let signers = match cms_signer_infos(pkcs7_der) {
     Some(s) => s
     None =>

@@ -125,43 +125,48 @@ fn Apk::verify_v2_crypto(self : Apk, rec : SigRecord) -> SignatureVerification {
     match key {
       None => detail = "public key is not a parseable RSA SPKI"
       Some(k) =>
-        for (alg_id, sig_bytes) in s.signatures {
-          // Android 签名算法 ID：0x0101/0x0102 = RSA-PSS(SHA-256/512)，
-          // 0x0103/0x0104 = RSA-PKCS#1 v1.5(SHA-256/512)；其余（ECDSA/DSA）不支持。
-          let (hash_name, digest, pss) = match alg_id {
-            0x0101U => ("SHA-256", sha256(s.signed_data), true)
-            0x0102U => ("SHA-512", sha512(s.signed_data), true)
-            0x0103U => ("SHA-256", sha256(s.signed_data), false)
-            0x0104U => ("SHA-512", sha512(s.signed_data), false)
-            _ => ("", b"", false)
-          }
-          let verified = if hash_name == "" {
-            false
-          } else if pss {
-            rsa_verify_pss(k, sig_bytes, digest, hash_name)
-          } else {
-            rsa_verify_pkcs1(k, sig_bytes, digest, hash_name)
-          }
-          if verified {
-            crypto_verified = true
-            algo = if pss {
-              if hash_name == "SHA-256" {
-                "SHA256withRSA/PSS"
+        if rsa_key_too_large(k) {
+          // 模数超 8192 位：fail-closed，且不进入模幂（DoS 面收敛）。
+          detail = "key too large"
+        } else {
+          for (alg_id, sig_bytes) in s.signatures {
+            // Android 签名算法 ID：0x0101/0x0102 = RSA-PSS(SHA-256/512)，
+            // 0x0103/0x0104 = RSA-PKCS#1 v1.5(SHA-256/512)；其余（ECDSA/DSA）不支持。
+            let (hash_name, digest, pss) = match alg_id {
+              0x0101U => ("SHA-256", sha256(s.signed_data), true)
+              0x0102U => ("SHA-512", sha512(s.signed_data), true)
+              0x0103U => ("SHA-256", sha256(s.signed_data), false)
+              0x0104U => ("SHA-512", sha512(s.signed_data), false)
+              _ => ("", b"", false)
+            }
+            let verified = if hash_name == "" {
+              false
+            } else if pss {
+              rsa_verify_pss(k, sig_bytes, digest, hash_name)
+            } else {
+              rsa_verify_pkcs1(k, sig_bytes, digest, hash_name)
+            }
+            if verified {
+              crypto_verified = true
+              algo = if pss {
+                if hash_name == "SHA-256" {
+                  "SHA256withRSA/PSS"
+                } else {
+                  "SHA512withRSA/PSS"
+                }
+              } else if hash_name == "SHA-256" {
+                "SHA256withRSA"
               } else {
-                "SHA512withRSA/PSS"
+                "SHA512withRSA"
               }
-            } else if hash_name == "SHA-256" {
-              "SHA256withRSA"
+              detail = if pss {
+                "RSA PSS signature verified over signed data"
+              } else {
+                "RSA PKCS#1 v1.5 signature verified over signed data"
+              }
             } else {
-              "SHA512withRSA"
+              detail = "signature failed verification or unsupported algorithm"
             }
-            detail = if pss {
-              "RSA PSS signature verified over signed data"
-            } else {
-              "RSA PKCS#1 v1.5 signature verified over signed data"
-            }
-          } else {
-            detail = "signature failed verification or unsupported algorithm"
           }
         }
     }

@@ -529,3 +529,38 @@ test "W6 malformed: DER INTEGER 与大数边界输入不 panic" {
   assert_true(big_is_zero(z))
   assert_eq(big_to_be_bytes(z).length(), 1)
 }
+
+///|
+test "W6 hardening: 模数 bit 长上限 8192，超限有界返回" {
+  let e = big_from_hex("10001")
+  // 8192 位：0x01 + 1023 个 0x00。
+  let n8192 : Array[Byte] = [b'\x01']
+  for i = 0; i < 1023; i = i + 1 {
+    n8192.push(b'\x00')
+  }
+  let key_8192 = rsa_key(big_from_be_bytes(Bytes::from_array(n8192[:])), e)
+  assert_true(!rsa_key_too_large(key_8192), msg="8192 位在上限内")
+  // 8193 位。
+  let n8193 : Array[Byte] = [b'\x01']
+  for i = 0; i < 1024; i = i + 1 {
+    n8193.push(b'\x00')
+  }
+  let key_8193 = rsa_key(big_from_be_bytes(Bytes::from_array(n8193[:])), e)
+  assert_true(rsa_key_too_large(key_8193), msg="8193 位超上限")
+  // 65544 位：无上限时模幂不可完成；用例完成即证明有界返回（不卡死）。
+  let huge : Array[Byte] = Array::make(8193, b'\xff')
+  let key_huge = rsa_key(big_from_be_bytes(Bytes::from_array(huge[:])), e)
+  let sig : Array[Byte] = Array::make(8193, b'\x01')
+  let sg = Bytes::from_array(sig[:])
+  let digest = sha256(b"w6-modulus-cap")
+  for alg in ["SHA-256", "SHA-512"] {
+    assert_true(
+      !rsa_verify_pkcs1(key_huge, sg, digest, alg),
+      msg="PKCS#1 超限模数应失败",
+    )
+    assert_true(
+      !rsa_verify_pss(key_huge, sg, digest, alg),
+      msg="PSS 超限模数应失败",
+    )
+  }
+}
