@@ -134,7 +134,7 @@ F = 申报核心功能，S = 预期使用场景，C = 安全约束。「现状�
 | F9 | 批量完整性报告 | — | P6 | — | unzip | ✅ | 已实现（W1，2026-11-17） | — |
 | F10 | 证书结构事实 | — | DER 截断 | — | apksigner | ✅ | **已实现（W3，M3）** | — |
 | F11 | verity 结构 | — | 位翻转 | — | — | — | **已实现（W5，M4）** | — |
-| F12 | 公钥验签（新通道） | — | 向量 | — | apksigner | — | **未实现** | W6 |
+| F12 | 公钥验签（新通道） | — | 向量 | — | apksigner | — | **已实现（W6·仅 RSA，M6-RSA-a/b/fix + M6-6）** | ECDSA #skip；oracle 差分 harness 就绪（无 SDK → 显式 SKIPPED） |
 | S1 | 逆向摸底：list --json → extract --entry | — | — | ✅ | — | **待建** | CLI 已有 | L4 场景化 |
 | S2 | 合规初筛：signatures/signature_checks 批量 | ✅ | 恒等式 | ✅ | apksigner | **待建** | API 已有 | L4 CI 形态 |
 | S3 | 取证提取：extract --all + 安全拒绝 | ✅ | 边界值 | ✅ | — | **待建** | 预检已有 | 内存时序→W2 |
@@ -217,4 +217,4 @@ python tests/local_real_diff.py …  # R（本地可选，哈希门禁）
 - [ ] L4：S1/S2/S3 + 安全拒绝语料 + 退出码矩阵全绿；记录行/JSON 契约断言生效
 - [ ] L5：错误簿记 10/10；双目标 diff=0；变异自检 3/3 变红后复绿
 - [ ] R：哈希门禁拒绝错误样本演示一次；真实样本结论未进入通过计数
-- [ ] 覆盖矩阵 §6.1 中所有「待建/缺口」项随 W1–W8 合入转为已覆盖或显式 SKIPPED（W6 未裁决前 F12 保持「未实现」标注，不得预写通过）
+- [x] 覆盖矩阵 §6.1 中所有「待建/缺口」项随 W1–W8 合入转为已覆盖或显式 SKIPPED（F12 已随 W6 落地（2026-11-18）：RSA 真验签 163/163 全绿，ECDSA `#skip`，apksigner oracle 差分 harness 就绪、SDK 缺失显式 SKIPPED）
