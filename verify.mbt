@@ -50,17 +50,30 @@ pub fn Apk::verify_signatures(
 }
 
 ///|
-/// v1 CMS 接入。M6-RSA-a 阶段尚未打通 signerInfo 签名值验证 → fail-closed；
-/// 结构与摘要沿用 `verify_v1` 的既有结论（不改变旧语义）。
+/// v1 CMS signerInfo 验签（M6-RSA-b）。结构与摘要沿用 `verify_v1` 的既有结论；
+/// 签名值走 `verify_v1_signer_info`（RSA PKCS#1 v1.5 over signedAttrs 或 content）。
 fn Apk::verify_v1_crypto(self : Apk, rec : SigRecord) -> SignatureVerification {
   let base = self.verify_v1(rec)
+  let sf_bytes = match rec.v1_sf {
+    Some(n) => self.safe_entry(n)
+    None => None
+  }
+  let pkcs7 = match rec.v1_block {
+    Some(n) => self.safe_entry(n)
+    None => None
+  }
+  let (crypto_verified, algo, detail) = match (sf_bytes, pkcs7) {
+    (Some(sf), Some(der)) => verify_v1_signer_info(rec.certs, sf, der)
+    _ =>
+      (false, "unsupported", "v1 signerInfo: .SF or PKCS#7 block unavailable")
+  }
   {
     scheme: rec.scheme,
     structure_ok: base.structure_ok,
     digest_ok: base.digest_ok,
-    crypto_verified: false,
-    algo: "unsupported",
-    detail: "v1 (JAR) signerInfo signature verification not yet wired (M6-RSA-b)",
+    crypto_verified,
+    algo,
+    detail,
   }
 }
 

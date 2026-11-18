@@ -370,6 +370,7 @@ test "whitebox: v2 content digest aggregation" {
     v1_manifest: None,
     value_off: 0,
     value_len: 0,
+    v1_block: None,
   }
   let check256 = apk.verify_v2(rec256)
   assert_true(check256.structure_ok, msg="结构完整")
@@ -384,6 +385,7 @@ test "whitebox: v2 content digest aggregation" {
     v1_manifest: None,
     value_off: 0,
     value_len: 0,
+    v1_block: None,
   }
   let check512 = apk.verify_v2(rec512)
   assert_true(check512.digest_ok, msg="SHA-512 内容摘要一致")
@@ -398,6 +400,7 @@ test "whitebox: v2 content digest aggregation" {
     v1_manifest: None,
     value_off: 0,
     value_len: 0,
+    v1_block: None,
   }
   let check_bad = apk.verify_v2(rec_bad)
   assert_true(

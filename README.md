@@ -12,7 +12,7 @@
 
 - 中央目录 / local 头索引与条目提取，支持多 dex（`classes*.dex`），拒绝 ZIP64
 - aapt2 裸对齐填充兼容（`zipmin.mbt`）；v1 / v2 / v3 / v3.1 签名块结构解析与摘要校验
-- **RSA 公钥验签**（W6，M6-RSA-a，2026-11-18 加法子能力）：`Apk::verify_signatures()` 对 v2/v3/v3.1 的 RSA PKCS#1 v1.5 签名值做真实公钥验签
+- **RSA 公钥验签**（W6，2026-11-18 加法子能力）：`Apk::verify_signatures()` 对 v1 的 CMS signerInfo 与 v2/v3/v3.1 的 RSA PKCS#1 v1.5 签名值做真实公钥验签
 - `AndroidManifest.xml`、`resources.arsc`、`classes.dex` 等条目的定位与字节提取
 - ELF 只读侦察：`DT_NEEDED`、`Java_*` JNI 导出、Dart AOT 标记（2026-11-10 加法性子能力）
 - `apk-cli list` / `extract`（`--all` / `--entry` / `--json`）
@@ -102,7 +102,7 @@ pub(all) struct ZipEntryRef {
 ## 6. 风险与未决
 
 - `resources.arsc` 完整展开的**语义归属**已裁决判给外部 `axml` 库（见 §2 决策行）；本库 `resource_table_full` / `parse_resources_arsc` 冻结不再增强，无「未裁决去重」遗留。
-- `verify_signatures()`（W6，公钥验签）已于 2026-11-18 裁决立项，采用**仅 RSA 降级**（方案 B）：M6-RSA-a 已落地 v2/v3/v3.1 的 RSA PKCS#1 v1.5 真验签；v1 CMS signerInfo 与 apksigner oracle 差分随后续档（M6-RSA-b / M6-6）；ECDSA 分支 `crypto_verified` 恒 false（fail-closed，`#skip` 立项），`signature_verified` 恒 false 语义不变。
+- `verify_signatures()`（W6，公钥验签）已于 2026-11-18 裁决立项，采用**仅 RSA 降级**（方案 B）：M6-RSA-a/b 已落地 v2/v3/v3.1 与 v1 CMS signerInfo 的 RSA PKCS#1 v1.5 真验签；apksigner oracle 差分随后续档（M6-6）；ECDSA 分支 `crypto_verified` 恒 false（fail-closed，`#skip` 立项），`signature_verified` 恒 false 语义不变。
 - 第三方 APK 许可不明，禁止入库；受控自建样本与哈希登记见本仓库 `tests/fixtures/`。
 - `zip@0.1.2` 单人维护、star=0 的 bus factor 风险已登记，不阻断使用。
 

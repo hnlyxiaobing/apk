@@ -43,6 +43,8 @@ priv struct SigRecord {
   /// 签名方案 value 在原文件中的偏移与长度（v2/v3/v3.1 验签用）。
   value_off : Int32
   value_len : Int32
+  /// v1 PKCS#7 签名块条目名（`META-INF/*.RSA|*.DSA|*.EC`，v1 验签用）。
+  v1_block : String?
 }
 
 ///|
@@ -117,6 +119,7 @@ fn Apk::collect_signature_records(
         v1_manifest: Some(manifest_name),
         value_off: 0,
         value_len: 0,
+        v1_block: Some(block_name),
       })
     }
     None => ()
@@ -170,6 +173,7 @@ fn Apk::collect_signature_records(
             v1_manifest: None,
             value_off,
             value_len,
+            v1_block: None,
           })
           recognized = recognized + 1
         }

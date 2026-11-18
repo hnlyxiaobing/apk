@@ -141,3 +141,18 @@
 ### 门禁
 
 `moon check --deny-warn` / `moon build` / `moon test`（156/156 全绿，1 个 `#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **纯加法 diff**（10 行纯增），全绿。
+
+### 2026-11-18 — M6-RSA-b（v1 CMS SignedData signerInfo 验签）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | M6-RSA-b：v1（JAR 签名）PKCS#7 CMS SignedData 的 signerInfo RSA 签名值验证 |
+| 新增 pub 声明 | **无**（内部实现；`verify_signatures` 已在 M6-RSA-a 公开） |
+| 快照 diff 结论 | **零 diff**（纯内部加法，mbti 不变） |
+| 测试增量 | `verify_wbtest.mbt` +3：v1 signedAttrs 路径真验签、v1 无 signedAttrs（签名覆盖内容）路径真验签、v1 篡改签名 fail-closed；`verify_test.mbt` 更新 1：真实 v1 样本按算法受支持性判定 |
+| 实现文件 | `cms.mbt`（新增，~430 行）：ContentInfo/SignedData/SignerInfo DER 解析、`messageDigest` 属性比对、signedAttrs→SET OF 重编码（0xA0→0x31）、X.509 SPKI 提取、RSA 验签接线；`signature.mbt`（SigRecord 新增 `v1_block`）；`verify.mbt`（`verify_v1_crypto` 接 CMS） |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（159/159 全绿，1 个 `#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
