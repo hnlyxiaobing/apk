@@ -7,3 +7,28 @@ test "extract cap constant is positive in-range Int32" {
   // 256 MiB = 268435456，小于 Int32 上限 2147483647。
   assert_eq(max_extract_bytes, 268435456)
 }
+
+///|
+/// `verify` 判定口径回归：必须是 structure_ok && digest_ok && crypto_verified 三者同时成立。
+/// 反例来自真实 apksigner oracle：v1 清单摘要被篡改时 signerInfo 签名值仍有效，
+/// 但 apksigner 判未通过——CLI 不能只看 crypto_verified。
+test "verify verdict requires structure+digest+crypto" {
+  let mk = fn(
+    structure_ok : Bool,
+    digest_ok : Bool,
+    crypto_verified : Bool,
+  ) -> @apk.SignatureVerification {
+    {
+      scheme: @apk.SignatureScheme::V1,
+      structure_ok,
+      digest_ok,
+      crypto_verified,
+      algo: "SHA256withRSA",
+      detail: "",
+    }
+  }
+  assert_true(verification_passed(mk(true, true, true)))
+  assert_true(!verification_passed(mk(true, false, true)))
+  assert_true(!verification_passed(mk(false, true, true)))
+  assert_true(!verification_passed(mk(true, true, false)))
+}

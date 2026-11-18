@@ -26,7 +26,7 @@ fn usage_text() -> String {
     "      列出 APK 内全部证书结构事实（W3：主体/颁发者/有效期/指纹；不验签）",
     "  \{tool_name} verify <apk> [--json]",
     "      公钥验签（W6，仅 RSA）：输出 VERIFY|scheme|structure_ok|digest_ok|crypto_verified|algo；",
-    "      退出码 0=全部方案验签通过，1=存在未通过方案（fail-closed）",
+    "      退出码 0=全部方案 structure_ok && digest_ok && crypto_verified，否则 1（fail-closed）",
     "  \{tool_name} --help",
     "",
     "输出: 默认人类可读记录行（规范化口径见 tests/ASSETS.md）；",
@@ -449,7 +449,7 @@ async fn cmd_verify(rest : ArrayView[String]) -> Int32 {
   let results = a.verify_signatures()
   let mut all_ok = true
   for v in results {
-    if !v.crypto_verified {
+    if !verification_passed(v) {
       all_ok = false
     }
   }
@@ -482,6 +482,13 @@ async fn cmd_verify(rest : ArrayView[String]) -> Int32 {
   } else {
     1
   }
+}
+
+///|
+/// 方案是否「验签通过」= 结构可解析 && 摘要一致 && 公钥验签成功。
+/// 与 `apksigner verify` 口径对齐：v1 清单摘要不一致时即便 signerInfo 签名值有效也判未通过。
+fn verification_passed(v : @apk.SignatureVerification) -> Bool {
+  v.structure_ok && v.digest_ok && v.crypto_verified
 }
 
 ///|

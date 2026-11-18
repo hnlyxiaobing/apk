@@ -4,10 +4,12 @@
 # 口径：
 #   - 主 oracle = `apksigner verify -v <apk>`（Android SDK build-tools）。判定文本含
 #     `Verifies` → 通过；含 `DOES NOT VERIFY` → 未通过。
-#   - 被测 = 本库 CLI `apk-cli verify <apk>`，退出码 0 = 全部方案 crypto_verified，
-#     1 = 存在未通过方案（fail-closed）。
+#   - 被测 = 本库 CLI `apk-cli verify <apk>`，退出码 0 = 全部方案
+#     structure_ok && digest_ok && crypto_verified，1 = fail-closed。
 #   - 仅对 **RSA** 样本做硬对账；ECDSA 样本按 W6 裁决 `#skip`（本库 fail-closed，
 #     与 apksigner 必然不一致，故排除出对账集并单列）。
+#   - `fx-multidex-v2v3.apk` 无 META-INF/MANIFEST.MF，apksigner 会以
+#     "Missing META-INF/MANIFEST.MF" 直接拒绝（非签名结论），故只做库内自一致校验。
 #
 # 退出码：
 #   0   差分一致（对账通过）
@@ -27,11 +29,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 
-# 受控样本：(路径, 期望本库结论 crypto_verified, 是否纳入 apksigner 硬对账)
-# real v1 / real v2v3 来自 tests/ASSETS.md 登记样本；unsigned 期望「无签名方案」。
+# 受控样本：(路径, 期望本库结论，是否纳入 apksigner 硬对账)
+# real v1 / real v2v3 / tvshell-debug 来自 tests/ASSETS.md 登记样本；
+# unsigned 期望「无签名方案」；v2v3 因缺 MANIFEST.MF 只做库内自一致校验。
 DEFAULT_SAMPLES = [
     (FIXTURES / "fx-multidex-v1.apk", True, True),
-    (FIXTURES / "fx-multidex-v2v3.apk", True, True),
+    (FIXTURES / "tvshell-debug.apk", True, True),
+    (FIXTURES / "fx-multidex-v2v3.apk", True, False),
     (FIXTURES / "fx-multidex-unsigned.apk", False, False),  # 无签名 → apksigner 也判未签名
 ]
 
@@ -134,8 +138,9 @@ def main() -> int:
     compared = 0
     for apk, expect, strict in samples:
         our_rc, our_lines = run_our_cli(cli, apk)
-        # 本库判定：有 VERIFY 行且全部 crypto_verified=true 才算通过。
-        ours = bool(our_lines) and all(ln.split("|")[4] == "true" for ln in our_lines)
+        # 本库判定以退出码为准（CLI 约定：0 = 全部方案结构/摘要/验签三真）。
+        # VERIFY 行仅用于展示逐方案明细的事实。
+        ours = bool(our_lines) and our_rc == 0
         ours_none = len(our_lines) == 0
 
         print(f"sample       : {apk.name}")
