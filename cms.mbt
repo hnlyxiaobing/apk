@@ -1,14 +1,14 @@
 ///|
-/// v1（JAR 签名）CMS SignedData 的 signerInfo 签名值验证（W6 / M6-RSA-b）。
+/// v1（JAR 签名）CMS SignedData 的 signerInfo 签名值验证（W6 / M6-RSA-b + ECDSA）。
 ///
-/// 覆盖范围：PKCS#7 `SignedData` 中每个 `SignerInfo` 的 RSA PKCS#1 v1.5 签名值。
+/// 覆盖范围：PKCS#7 `SignedData` 中每个 `SignerInfo` 的 RSA PKCS#1 v1.5 / ECDSA 签名值。
 /// 验签对象口径（与 apksigner / jarsigner 一致）：
 /// - 若 signerInfo 带 `authenticatedAttributes`（[0] IMPLICIT SET OF Attribute），
 ///   签名覆盖的是把这些属性**重新编码为 SET OF（tag 0x31）**的 DER 字节，
 ///   且其中 `messageDigest` 属性值必须等于 `.SF` 文件的摘要；
 /// - 若不 signedAttrs，签名直接覆盖 `.SF` 内容。
 ///
-/// 只实现 RSA；ECDSA/DSA/未知算法一律 fail-closed（返回 false）。
+/// DSA/未知算法一律 fail-closed（返回 false）。
 /// 不新增 `ApkError` 变体；解析失败一律返回 false（不抛错）。
 
 ///|
@@ -16,7 +16,7 @@
 priv struct CmsSignerInfo {
   /// 摘要算法名（"SHA-256" / "SHA-512" / "" 表示不支持）。
   digest_alg : String
-  /// 签名算法名（"RSA" / "unsupported"）。
+  /// 签名算法名（"RSA" / "ECDSA" / "unsupported"）。
   sig_alg : String
   /// `authenticatedAttributes` 原始 DER（含 0xA0 tag）；None 表示无签名属性。
   signed_attrs : Bytes?
@@ -43,13 +43,22 @@ fn verify_v1_signer_info(
         false, "unsupported", "v1 signerInfo: certificate SPKI unreadable",
       )
   }
-  let key = match rsa_public_key_from_spki(spki) {
-    Some(k) => k
-    None =>
-      return (false, "unsupported", "v1 signerInfo: certificate key is not RSA")
+  let rsa_key = rsa_public_key_from_spki(spki)
+  let ec_key = match rsa_key {
+    Some(_) => None
+    None => ec_public_key_from_spki(spki)
   }
-  if rsa_key_too_large(key) {
-    return (false, "unsupported", "v1 signerInfo: key too large")
+  match (rsa_key, ec_key) {
+    (None, None) =>
+      return (
+        false, "unsupported", "v1 signerInfo: certificate key is not a parseable RSA or EC SPKI",
+      )
+    _ => ()
+  }
+  if rsa_key is Some(key) {
+    if rsa_key_too_large(key) {
+      return (false, "unsupported", "v1 signerInfo: key too large")
+    }
   }
   let signers = match cms_signer_infos(pkcs7_der) {
     Some(s) => s
@@ -57,50 +66,153 @@ fn verify_v1_signer_info(
       return (false, "unsupported", "v1 signerInfo: CMS SignedData unreadable")
   }
   let mut algo = "unsupported"
-  let mut detail = "v1 signerInfo: no verifiable RSA signature"
+  let mut detail = "v1 signerInfo: no verifiable RSA or ECDSA signature"
   for si in signers {
-    if si.sig_alg != "RSA" || si.digest_alg == "" {
+    if si.digest_alg == "" {
       detail = "v1 signerInfo: unsupported algorithm"
       continue
     }
-    algo = if si.digest_alg == "SHA-256" {
-      "SHA256withRSA"
-    } else {
-      "SHA512withRSA"
-    }
-    match si.signed_attrs {
-      Some(attrs) => {
-        // 1) messageDigest 属性必须等于 .SF 摘要。
-        let md_ok = match si.message_digest {
-          Some(md) => cms_digest_eq(si.digest_alg, sf_bytes, md)
-          None => false
-        }
-        if !md_ok {
-          detail = "v1 signerInfo: messageDigest attribute mismatch or missing"
+    if si.sig_alg == "RSA" {
+      let key = match rsa_key {
+        Some(k) => k
+        None => {
+          detail = "v1 signerInfo: certificate key is not RSA"
           continue
         }
-        // 2) 签名覆盖重新编码为 SET OF（0x31）的属性字节。
-        let signed_bytes = cms_attrs_as_set(attrs)
-        let digest = cms_hash(si.digest_alg, signed_bytes)
-        if rsa_verify_pkcs1(key, si.signature, digest, si.digest_alg) {
-          return (
-            true, algo, "v1 signerInfo: RSA signature verified over signed attributes",
-          )
-        }
-        detail = "v1 signerInfo: signature over signed attributes failed verification"
       }
-      None => {
-        let digest = cms_hash(si.digest_alg, sf_bytes)
-        if rsa_verify_pkcs1(key, si.signature, digest, si.digest_alg) {
-          return (
-            true, algo, "v1 signerInfo: RSA signature verified over .SF content",
-          )
-        }
-        detail = "v1 signerInfo: signature over content failed verification"
+      algo = if si.digest_alg == "SHA-256" {
+        "SHA256withRSA"
+      } else {
+        "SHA512withRSA"
       }
+      match si.signed_attrs {
+        Some(attrs) => {
+          // 1) messageDigest 属性必须等于 .SF 摘要。
+          let md_ok = match si.message_digest {
+            Some(md) => cms_digest_eq(si.digest_alg, sf_bytes, md)
+            None => false
+          }
+          if !md_ok {
+            detail = "v1 signerInfo: messageDigest attribute mismatch or missing"
+            continue
+          }
+          // 2) 签名覆盖重新编码为 SET OF（0x31）的属性字节。
+          let signed_bytes = cms_attrs_as_set(attrs)
+          let digest = cms_hash(si.digest_alg, signed_bytes)
+          if rsa_verify_pkcs1(key, si.signature, digest, si.digest_alg) {
+            return (
+              true, algo, "v1 signerInfo: RSA signature verified over signed attributes",
+            )
+          }
+          detail = "v1 signerInfo: signature over signed attributes failed verification"
+        }
+        None => {
+          let digest = cms_hash(si.digest_alg, sf_bytes)
+          if rsa_verify_pkcs1(key, si.signature, digest, si.digest_alg) {
+            return (
+              true, algo, "v1 signerInfo: RSA signature verified over .SF content",
+            )
+          }
+          detail = "v1 signerInfo: signature over content failed verification"
+        }
+      }
+    } else if si.sig_alg == "ECDSA" {
+      let (curve, qx, qy) = match ec_key {
+        Some(v) => v
+        None => {
+          detail = "v1 signerInfo: certificate key is not EC"
+          continue
+        }
+      }
+      let params = match ec_params(curve) {
+        Some(p) => p
+        None => {
+          detail = "v1 signerInfo: unsupported EC curve"
+          continue
+        }
+      }
+      algo = if si.digest_alg == "SHA-256" {
+        "SHA256withECDSA"
+      } else {
+        "SHA512withECDSA"
+      }
+      match si.signed_attrs {
+        Some(attrs) => {
+          // 1) messageDigest 属性必须等于 .SF 摘要（与 RSA 路径一致）。
+          let md_ok = match si.message_digest {
+            Some(md) => cms_digest_eq(si.digest_alg, sf_bytes, md)
+            None => false
+          }
+          if !md_ok {
+            detail = "v1 signerInfo: messageDigest attribute mismatch or missing"
+            continue
+          }
+          // 2) 签名覆盖重新编码为 SET OF（0x31）的属性字节。
+          let signed_bytes = cms_attrs_as_set(attrs)
+          let digest = cms_hash(si.digest_alg, signed_bytes)
+          let (ok, why) = cms_ecdsa_verify(
+            params,
+            qx,
+            qy,
+            si.signature,
+            big_from_be_bytes(digest),
+            si.digest_alg,
+          )
+          if ok {
+            return (
+              true, algo, "v1 signerInfo: ECDSA signature verified over signed attributes",
+            )
+          }
+          detail = why
+        }
+        None => {
+          let digest = cms_hash(si.digest_alg, sf_bytes)
+          let (ok, why) = cms_ecdsa_verify(
+            params,
+            qx,
+            qy,
+            si.signature,
+            big_from_be_bytes(digest),
+            si.digest_alg,
+          )
+          if ok {
+            return (
+              true, algo, "v1 signerInfo: ECDSA signature verified over .SF content",
+            )
+          }
+          detail = why
+        }
+      }
+    } else {
+      detail = "v1 signerInfo: unsupported algorithm"
     }
   }
   (false, algo, detail)
+}
+
+///|
+/// v1 CMS ECDSA 签名值验签：DER 解码 `SEQUENCE{INTEGER r, INTEGER s}` 后调
+/// `ec_ecdsa_verify`（r/s 越界、曲线不匹配、公钥非法均由其内部 fail-closed）。
+fn cms_ecdsa_verify(
+  params : EcParams,
+  qx : BigInt,
+  qy : BigInt,
+  sig_der : Bytes,
+  e : BigInt,
+  hash_name : String,
+) -> (Bool, String) {
+  match ec_sig_from_der(sig_der) {
+    None => (false, "v1 signerInfo: ECDSA signature value is not valid DER")
+    Some((r, s)) =>
+      if ec_ecdsa_verify(params, qx, qy, e, r, s) {
+        (true, "")
+      } else {
+        (
+          false,
+          "v1 signerInfo: ECDSA " + hash_name + " signature failed verification",
+        )
+      }
+  }
 }
 
 ///|
@@ -375,7 +487,7 @@ fn cms_digest_alg_name(der : Bytes, alg : DerTlv) -> String {
 }
 
 ///|
-/// AlgorithmIdentifier → 签名算法名（仅 RSA 系列，其余 "unsupported"）。
+/// AlgorithmIdentifier → 签名算法名（RSA / ECDSA 系列，其余 "unsupported"）。
 fn cms_sig_alg_name(der : Bytes, alg : DerTlv) -> String {
   let oid = match der_read(der, alg.body, alg.end) {
     Some(t) => t
@@ -388,6 +500,12 @@ fn cms_sig_alg_name(der : Bytes, alg : DerTlv) -> String {
     der_oid_is(der, oid.body, oid.end, oid_sha512_with_rsa) ||
     der_oid_is(der, oid.body, oid.end, oid_rsa_encryption) {
     "RSA"
+  } else if der_oid_is(der, oid.body, oid.end, oid_ecdsa_with_sha256) ||
+    der_oid_is(der, oid.body, oid.end, oid_ecdsa_with_sha512) ||
+    der_oid_is(der, oid.body, oid.end, oid_ecdsa_with_sha1) ||
+    der_oid_is(der, oid.body, oid.end, oid_ecdsa_secp521r1) {
+    // 具体摘要以 signerInfo 的 digestAlgorithm 为准（ECDSA 无 PSS 变体）。
+    "ECDSA"
   } else {
     "unsupported"
   }
@@ -478,3 +596,19 @@ let oid_sha256 : Bytes = b"\x60\x86\x48\x01\x65\x03\x04\x02\x01"
 ///|
 /// OID 2.16.840.1.101.3.4.2.3（sha512）。
 let oid_sha512 : Bytes = b"\x60\x86\x48\x01\x65\x03\x04\x02\x03"
+
+///|
+/// OID 1.2.840.10045.4.3.2（ecdsa-with-SHA256）。
+let oid_ecdsa_with_sha256 : Bytes = b"\x2a\x86\x48\xce\x3d\x04\x03\x02"
+
+///|
+/// OID 1.2.840.10045.4.3.3（ecdsa-with-SHA512）。
+let oid_ecdsa_with_sha512 : Bytes = b"\x2a\x86\x48\xce\x3d\x04\x03\x03"
+
+///|
+/// OID 1.2.840.10045.4.1（ecdsa-with-SHA1；部分工具使用的通配签名算法 OID）。
+let oid_ecdsa_with_sha1 : Bytes = b"\x2a\x86\x48\xce\x3d\x04\x01"
+
+///|
+/// OID 1.3.132.0.35（secp521r1；部分工具用作 ECDSA 签名算法别名）。
+let oid_ecdsa_secp521r1 : Bytes = b"\x2b\x81\x04\x00\x23"
