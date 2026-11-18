@@ -342,6 +342,26 @@ async fn cmd_extract(rest : ArrayView[String]) -> Int32 {
         return 1
       }
     }
+    // 路径冲突预检（S3-拒）：大小写冲突（`a.txt` 与 `A.txt` 在大小写不敏感 FS 上
+    // 落到同一路径，会静默覆盖）与互为目录前缀（`a.txt` 与 `a.txt/A.txt`，一个条目
+    // 既要当文件又要当目录）都在写盘前整体拒绝，杜绝「部分写入后才失败」。
+    for i = 0; i < names.length(); i = i + 1 {
+      for j = i + 1; j < names.length(); j = j + 1 {
+        if names[i].to_lower() == names[j].to_lower() {
+          eprintln(
+            "error: 拒绝大小写冲突的条目名（会覆盖彼此）：\{names[i]} 与 \{names[j]}",
+          )
+          return 1
+        }
+        if names[j].has_prefix(names[i] + "/") ||
+          names[i].has_prefix(names[j] + "/") {
+          eprintln(
+            "error: 拒绝路径冲突的条目名（条目既是文件又是目录）：\{names[i]} 与 \{names[j]}",
+          )
+          return 1
+        }
+      }
+    }
   }
   for name in names {
     match find_entry_ref(a.entries(), name) {
@@ -465,7 +485,7 @@ async fn cmd_verify(rest : ArrayView[String]) -> Int32 {
       }
       first = false
       parts.push(
-        "{\"scheme\":\{scheme_name(v.scheme)},\"structure_ok\":\{bool_str(v.structure_ok)},\"digest_ok\":\{bool_str(v.digest_ok)},\"crypto_verified\":\{bool_str(v.crypto_verified)},\"algo\":\{json_escape(v.algo)},\"detail\":\{json_escape(v.detail)}}",
+        "{\"scheme\":\{json_escape(scheme_name(v.scheme))},\"structure_ok\":\{bool_str(v.structure_ok)},\"digest_ok\":\{bool_str(v.digest_ok)},\"crypto_verified\":\{bool_str(v.crypto_verified)},\"algo\":\{json_escape(v.algo)},\"detail\":\{json_escape(v.detail)}}",
       )
     }
     parts.push("]}")

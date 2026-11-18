@@ -135,13 +135,13 @@ F = 申报核心功能，S = 预期使用场景，C = 安全约束。「现状�
 | F10 | 证书结构事实 | — | DER 截断 | — | apksigner | ✅ | **已实现（W3，M3）** | — |
 | F11 | verity 结构 | — | 位翻转 | — | — | — | **已实现（W5，M4）** | — |
 | F12 | 公钥验签（新通道） | — | 向量 | — | apksigner | — | **已实现（W6·仅 RSA，M6-RSA-a/b/fix + M6-6 + W6-hardening-1..5）** | ECDSA #skip；apksigner oracle 已实跑（2026-11-18，build-tools r34）：3 真 RSA + 3 篡改，6/6 AGREE |
-| S1 | 逆向摸底：list --json → extract --entry | — | — | ✅ | — | **待建** | CLI 已有 | L4 场景化 |
-| S2 | 合规初筛：signatures/signature_checks 批量 | ✅ | 恒等式 | ✅ | apksigner | **待建** | API 已有 | L4 CI 形态 |
-| S3 | 取证提取：extract --all + 安全拒绝 | ✅ | 边界值 | ✅ | — | **待建** | 预检已有 | 内存时序→W2 |
-| C1 | 路径穿越拒绝（绝对/`..`/`\`/盘符/控制字符） | ✅ | 语料 | — | — | **待建** | 已实现 | L4 固化 |
-| C2 | 256 MiB 上限（声明+实际） | ✅ | ±1 | — | — | **待建** | 已实现 | 伪造声明→W2 |
-| C3 | 解压炸弹内存有界 | — | 伪造流 | — | — | **待建** | **缺口** | W2 |
-| C4 | 退出码 0/1/2 矩阵 | — | — | — | — | **待建** | 已实现 | L4 固化 |
+| S1 | 逆向摸底：list --json → extract --entry | — | — | ✅ | — | ✅ | 已覆盖（L4 cli_e2e.py 哈希对 zipfile 引用） | — |
+| S2 | 合规初筛：signatures/signature_checks 批量 | ✅ | 恒等式 | ✅ | apksigner | ✅ | API 已有 + L4 verify/certs 契约 | — |
+| S3 | 取证提取：extract --all + 安全拒绝 | ✅ | 边界值 | ✅ | — | ✅ | 已覆盖（L4 cli_e2e.py 落盘哈希 + 4 类恶意条目预检拒绝） | — |
+| C1 | 路径穿越拒绝（绝对/`..`/`\`/盘符/控制字符） | ✅ | 语料 | — | — | ✅ | 已实现 + L4 固化 | — |
+| C2 | 256 MiB 上限（声明+实际） | ✅ | ±1 | — | — | — | 已实现（W2 预检拒绝） | — |
+| C3 | 解压炸弹内存有界 | — | 伪造流 | — | — | — | 已实现（W2 `entry_capped` inflate 前预检） | — |
+| C4 | 退出码 0/1/2 矩阵 | — | — | — | — | ✅ | 已实现 + L4 逐条断言 | — |
 
 ### 6.2 错误变体覆盖簿记（A2/A5 的账本，10/10 强制）
 
@@ -214,7 +214,7 @@ python tests/local_real_diff.py …  # R（本地可选，哈希门禁）
 
 **测试系统落地验收（随 M0–M3 逐包勾选）**：
 - [~] L1：P1–P6 变形律、位翻转、边界值矩阵、截断扫描（全 fixture）落地并绿（P1–P4/P6 + 位翻转/边界值/截断扫描已绿；P5 签名块位移不变性收口轮 P3 落地，见 `l1_property_test.mbt`）
-- [ ] L4：S1/S2/S3 + 安全拒绝语料 + 退出码矩阵全绿；记录行/JSON 契约断言生效（收口轮 P1，`tests/cli_e2e.py`）
+- [x] L4：S1/S2/S3 + 安全拒绝语料 + 退出码矩阵全绿；记录行/JSON 契约断言生效（收口轮 P1，2026-11-18，`tests/cli_e2e.py`：53/53 PASS；含 `verify --json` scheme 字段引用化修复 + `extract --all` 大小写/目录前缀冲突预检）
 - [ ] L5：错误簿记 10/10；双目标 diff=0；变异自检 3/3 变红后复绿（收口轮 P2，`tools/parity-check.ps1` / `tools/mutation-sanity.ps1`）
 - [ ] R：哈希门禁拒绝错误样本演示一次；真实样本结论未进入通过计数（收口轮 P3，`tests/local_real_diff.py`）
 - [x] 覆盖矩阵 §6.1 中所有「待建/缺口」项随 W1–W8 合入转为已覆盖或显式 SKIPPED（F12 已随 W6 落地（2026-11-18）：RSA 真验签 186/186 全绿，ECDSA `#skip`；apksigner oracle 已实跑 3 真 + 3 篡改 6/6 AGREE，M6-6 的 SKIPPED 已被覆盖）

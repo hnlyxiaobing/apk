@@ -279,3 +279,19 @@
 ### 门禁
 
 `moon check --deny-warn` / `moon build` / `moon test`（186/186 全绿，1 个 `#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — 收口轮 P1（L4 CLI 端到端 E2E）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | 收口轮 P1：落地 L4 CLI 端到端 `tests/cli_e2e.py`（Python 标准库驱动 native 二进制） |
+| 新增 pub 声明 | **无**（CLI 内部加固 + 测试脚本，`pkg.generated.mbti` 零 diff） |
+| 快照 diff 结论 | **零 diff** |
+| 脚本 | `tests/cli_e2e.py`：53/53 PASS（0 FAIL 0 SKIPPED），退出码矩阵 0/1/2、记录行/JSON 字段契约、`extract --entry/--all` 落盘哈希对 zipfile 独立引用、4 类恶意条目名（`../evil`、`/abs`、`a.txt`+`a.txt/A.txt`、`a.txt`+`A.txt`）写盘前整体拒绝、无 panic 断言 |
+| CLI 加固（`cmd/main/main.mbt`） | ① `verify --json` 的 `scheme` 字段由未引用（`"scheme":v2`，非法 JSON）修正为 `json_escape`（合法 JSON）；② `extract --all` 预检新增大小写冲突（`a.txt`/`A.txt` 在大小写不敏感 FS 上覆盖）与目录前缀冲突（`a.txt` 文件 + `a.txt/A.txt` 子条目）整体拒绝，杜绝「部分写入后才失败」 |
+| 验证命令 | `python tests/cli_e2e.py` → `cli_e2e: PASS=53 FAIL=0 SKIPPED=0 ALL PASS` |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（186/186 全绿，1 个 `#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
