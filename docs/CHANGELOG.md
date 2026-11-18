@@ -295,3 +295,18 @@
 ### 门禁
 
 `moon check --deny-warn` / `moon build` / `moon test`（186/186 全绿，1 个 `#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — 收口轮 P2（L5 元契约门禁）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | 收口轮 P2：落地 L5 三件工具——双目标等价 / 错误簿记 / 变异自检 |
+| 新增 pub 声明 | **无**（纯脚本层，不触碰 MoonBit 源码，`pkg.generated.mbti` 零 diff） |
+| 快照 diff 结论 | **零 diff** |
+| 工具 | `tools/parity-check.ps1`（A6 双目标等价：wasm vs native 同一 fixture 集 CLI JSON 值输出逐字节 diff=0，12/12 PASS）；`tools/error-bookkeeping.ps1`（§6.2 与测试断言双向 grep，10/10 缺一即红）；`tools/mutation-sanity.ps1`（注入 3 类缺陷——跳过 CRC / 放行 `..` 条目名 / `signature_verified` 置 true，套件必须变红，try/finally 自动还原并复绿，工作区零残留） |
+| 验证命令 | `powershell tools/parity-check.ps1` → PASS=12 mismatches=0；`powershell tools/error-bookkeeping.ps1` → 10/10 双向对齐；`powershell tools/mutation-sanity.ps1` → 3/3 缺陷均变红且还原复绿、工作区无残留 |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（186/186 全绿，1 个 `#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
