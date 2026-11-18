@@ -24,6 +24,9 @@ fn usage_text() -> String {
     "      单个条目解压后大小上限 256 MiB，超出退出码 1）",
     "  \{tool_name} certs <apk> [--json]",
     "      列出 APK 内全部证书结构事实（W3：主体/颁发者/有效期/指纹；不验签）",
+    "  \{tool_name} verify <apk> [--json]",
+    "      公钥验签（W6，仅 RSA）：输出 VERIFY|scheme|structure_ok|digest_ok|crypto_verified|algo；",
+    "      退出码 0=全部方案验签通过，1=存在未通过方案（fail-closed）",
     "  \{tool_name} --help",
     "",
     "输出: 默认人类可读记录行（规范化口径见 tests/ASSETS.md）；",
@@ -396,6 +399,113 @@ async fn cmd_extract(rest : ArrayView[String]) -> Int32 {
 }
 
 ///|
+/// `verify` 子命令（W6）：输出每个签名方案的公钥验签结论（机器可读）。
+///
+/// 行格式：`VERIFY|<scheme>|<structure_ok>|<digest_ok>|<crypto_verified>|<algo>`
+/// 退出码：全部 `crypto_verified=true` → 0；否则 1（`--json` 时仅输出 JSON）。
+async fn cmd_verify(rest : ArrayView[String]) -> Int32 {
+  let mut apk_path = ""
+  let mut json = false
+  for xs = rest {
+    match xs {
+      ["--json", .. r] => {
+        json = true
+        continue r
+      }
+      ["--help", ..] => {
+        println(usage_text())
+        return 0
+      }
+      ["-h", ..] => {
+        println(usage_text())
+        return 0
+      }
+      [p, .. r] => {
+        if p.has_prefix("-") {
+          eprintln("error: 未知选项：\{p}")
+          eprintln("用法: \{tool_name} verify <apk> [--json]")
+          return 2
+        }
+        if apk_path != "" {
+          eprintln("error: 多余的位置参数：\{p}")
+          return 2
+        }
+        apk_path = p
+        continue r
+      }
+      [] => break
+    }
+  }
+  if apk_path == "" {
+    eprintln("error: verify 需要 <apk> 参数")
+    eprintln("用法: \{tool_name} verify <apk> [--json]")
+    return 2
+  }
+  let (data, ok) = read_input(apk_path)
+  if !ok {
+    return 1
+  }
+  let a = @apk.Apk::open(data)
+  let results = a.verify_signatures()
+  let mut all_ok = true
+  for v in results {
+    if !v.crypto_verified {
+      all_ok = false
+    }
+  }
+  if json {
+    let parts : Array[String] = []
+    parts.push(
+      "{\"tool\":\"\{tool_name}\",\"apk\":\{json_escape(apk_path)},\"verifications\":[",
+    )
+    let mut first = true
+    for v in results {
+      if !first {
+        parts.push(",")
+      }
+      first = false
+      parts.push(
+        "{\"scheme\":\{scheme_name(v.scheme)},\"structure_ok\":\{bool_str(v.structure_ok)},\"digest_ok\":\{bool_str(v.digest_ok)},\"crypto_verified\":\{bool_str(v.crypto_verified)},\"algo\":\{json_escape(v.algo)},\"detail\":\{json_escape(v.detail)}}",
+      )
+    }
+    parts.push("]}")
+    println(str_join(parts))
+  } else {
+    for v in results {
+      println(
+        "VERIFY|\{scheme_name(v.scheme)}|\{bool_str(v.structure_ok)}|\{bool_str(v.digest_ok)}|\{bool_str(v.crypto_verified)}|\{v.algo}",
+      )
+    }
+  }
+  if all_ok && results.length() > 0 {
+    0
+  } else {
+    1
+  }
+}
+
+///|
+/// 签名方案名（机器可读）。
+fn scheme_name(s : @apk.SignatureScheme) -> String {
+  match s {
+    @apk.SignatureScheme::V1 => "v1"
+    @apk.SignatureScheme::V2 => "v2"
+    @apk.SignatureScheme::V3 => "v3"
+    @apk.SignatureScheme::V31 => "v3.1"
+  }
+}
+
+///|
+/// Bool → JSON/文本用的 "true"/"false"。
+fn bool_str(b : Bool) -> String {
+  if b {
+    "true"
+  } else {
+    "false"
+  }
+}
+
+///|
 /// `certs` 子命令（W3）：列出 APK 内全部证书结构事实。
 async fn cmd_certs(rest : ArrayView[String]) -> Int32 {
   let mut apk_path = ""
@@ -494,6 +604,13 @@ async fn run(args : Array[String]) -> Int32 {
     }
   } else if sub == "certs" {
     cmd_certs(rest) catch {
+      e => {
+        eprintln("error: \{e}")
+        1
+      }
+    }
+  } else if sub == "verify" {
+    cmd_verify(rest) catch {
       e => {
         eprintln("error: \{e}")
         1

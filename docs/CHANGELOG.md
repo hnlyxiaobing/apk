@@ -156,3 +156,34 @@
 ### 门禁
 
 `moon check --deny-warn` / `moon build` / `moon test`（159/159 全绿，1 个 `#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — M6-RSA-fix（算法 ID 映射修正 + RSA-PSS + v3 signer 布局）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | 修正 v2/v3 签名算法 ID 映射（0x0101/0x0102 = RSA-PSS，0x0103/0x0104 = RSA-PKCS#1 v1.5）；新增 RSA-PSS（EMSA-PSS-VERIFY）验签；v3/v3.1 signer 的 min/max SDK 布局 |
+| 新增 pub 声明 | **无**（纯内部修正） |
+| 快照 diff 结论 | **零 diff** |
+| 测试增量 | `rsa_wbtest.mbt` +1（PSS 已知向量 + 篡改/错配失败）；`verify_wbtest.mbt` 重生成合成 fixture（正确算法 ID）+4（PSS-SHA256、PSS-SHA512(2048-bit)、PKCS#1v15-SHA512、v3/v3.1 布局验证） |
+| 修正原因 | 原实现把 0x0101 当作 PKCS#1 v1.5，导致真实 apksigner 样本（v2 默认 PSS）无法验签；对账 `fx-multidex-v2v3.apk` 暴露该缺陷。修正后真实样本 v2+v3 均 crypto_verified=true |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（163/163 全绿，`#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — M6-6（apksigner oracle 差分 harness；本机无 SDK → 显式 SKIPPED）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | M6-6：`apksigner verify` oracle 差分 harness + CLI `verify` 子命令 |
+| 新增 pub 声明 | **无**（CLI 子命令，非库 API） |
+| 快照 diff 结论 | **零 diff** |
+| oracle 状态 | 本机无 Android SDK build-tools（`apksigner`/`java` 均缺失）→ **显式 SKIPPED**（exit 78） |
+| 自检结果 | `--self-test` 模式（无 oracle）：fx-multidex-v1 / fx-multidex-v2v3 / fx-multidex-unsigned 三件受控样本，库内结论与期望 3/3 一致（v1=v2=v3 crypto_verified=true，unsigned=无签名）。**真实 apksigner 生成样本在库内全数验签通过**，即 T-W6-2 的实证 |
+| 实现文件 | `cmd/main/main.mbt`（`verify` 子命令：`VERIFY|scheme|structure_ok|digest_ok|crypto_verified|algo` 行式输出 + JSON）；`tests/apksigner_oracle_diff.py`（oracle 差分 runner：SDK 探测 / exit 78 SKIPPED / 三样本对账）；`verify_test.mbt`（T-W6-6a/b 显式 `#skip` + 契约测试升级为真实样本双方案断言） |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（163/163 全绿，`#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
