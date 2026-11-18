@@ -126,21 +126,40 @@ fn Apk::verify_v2_crypto(self : Apk, rec : SigRecord) -> SignatureVerification {
       None => detail = "public key is not a parseable RSA SPKI"
       Some(k) =>
         for (alg_id, sig_bytes) in s.signatures {
-          // 只支持 RSA PKCS#1 v1.5（0x0101 SHA-256 / 0x0102 SHA-512）。
-          let (hash_name, digest) = match alg_id {
-            0x0101U => ("SHA-256", sha256(s.signed_data))
-            0x0102U => ("SHA-512", sha512(s.signed_data))
-            _ => ("", b"")
+          // Android 签名算法 ID：0x0101/0x0102 = RSA-PSS(SHA-256/512)，
+          // 0x0103/0x0104 = RSA-PKCS#1 v1.5(SHA-256/512)；其余（ECDSA/DSA）不支持。
+          let (hash_name, digest, pss) = match alg_id {
+            0x0101U => ("SHA-256", sha256(s.signed_data), true)
+            0x0102U => ("SHA-512", sha512(s.signed_data), true)
+            0x0103U => ("SHA-256", sha256(s.signed_data), false)
+            0x0104U => ("SHA-512", sha512(s.signed_data), false)
+            _ => ("", b"", false)
           }
-          if hash_name != "" &&
-            rsa_verify_pkcs1(k, sig_bytes, digest, hash_name) {
+          let verified = if hash_name == "" {
+            false
+          } else if pss {
+            rsa_verify_pss(k, sig_bytes, digest, hash_name)
+          } else {
+            rsa_verify_pkcs1(k, sig_bytes, digest, hash_name)
+          }
+          if verified {
             crypto_verified = true
-            algo = if hash_name == "SHA-256" {
+            algo = if pss {
+              if hash_name == "SHA-256" {
+                "SHA256withRSA/PSS"
+              } else {
+                "SHA512withRSA/PSS"
+              }
+            } else if hash_name == "SHA-256" {
               "SHA256withRSA"
             } else {
               "SHA512withRSA"
             }
-            detail = "RSA PKCS#1 v1.5 signature verified over signed data"
+            detail = if pss {
+              "RSA PSS signature verified over signed data"
+            } else {
+              "RSA PKCS#1 v1.5 signature verified over signed data"
+            }
           } else {
             detail = "signature failed verification or unsupported algorithm"
           }
@@ -171,6 +190,7 @@ fn Apk::try_extract_scheme_verify(
         rec.value_off,
         rec.value_len,
         rec.value_off,
+        rec.scheme,
       ),
     )
   } catch {
@@ -193,7 +213,8 @@ priv struct SignerVerifyData {
 /// 从签名方案 value 中提取每个 signer 的 signed-data 原始字节、签名记录与公钥 SPKI。
 ///
 /// 布局与 `extract_signer_data` 相同，但额外取：
-///   signer = signed_data(长度前缀) + signatures(长度前缀序列) + public_key(长度前缀)。
+///   v2  signer = signed_data(长度前缀) + signatures(长度前缀序列) + public_key(长度前缀)。
+///   v3/3.1 signer = signed_data + uint32 minSdk + uint32 maxSdk + signatures + public_key。
 /// signatures = u32 序列长 { u32 记录长 u32 算法ID u32 签名长 签名 }*。
 /// signed-data 内容字节即签名覆盖对象（不含其自身长度前缀）。
 fn extract_scheme_verify(
@@ -201,6 +222,7 @@ fn extract_scheme_verify(
   value_off : Int32,
   value_len : Int32,
   pair_off : Int32,
+  scheme : SignatureScheme,
 ) -> Array[SignerVerifyData] raise ApkError {
   let out : Array[SignerVerifyData] = []
   let end = value_off + value_len
@@ -240,6 +262,13 @@ fn extract_scheme_verify(
     let sd_end = sd_content + sd_len.reinterpret_as_int()
     let signed_data = source[sd_content:sd_end].to_owned()
     sp = sd_end
+    // v3 / v3.1：signed_data 之后是 minSdk / maxSdk 两个裸 uint32。
+    if scheme is SignatureScheme::V3 || scheme is SignatureScheme::V31 {
+      guard sp + 8 <= signer_end else {
+        raise ApkError::BadSigningBlock(pair_off, "v3 min/max SDK missing")
+      }
+      sp = sp + 8
+    }
     // signatures（长度前缀序列）
     guard sp + 4 <= signer_end else {
       raise ApkError::BadSigningBlock(pair_off, "signatures length missing")

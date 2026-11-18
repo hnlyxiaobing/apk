@@ -188,3 +188,166 @@ fn rsa_verify_pkcs1(
   }
   true
 }
+
+///|
+/// RSA 验签（PSS，RFC 8017 §9.1.2 / EMSA-PSS-VERIFY），salt 长度 = 摘要长度。
+///
+/// 用于 Android APK Signature Scheme 的 0x0101（PSS+SHA-256）/ 0x0102（PSS+SHA-512）
+/// 签名算法 ID。`msg_digest` 为待验数据的摘要（`H(M)`），而非消息本身。
+fn rsa_verify_pss(
+  key : RsaPublicKey,
+  signature : Bytes,
+  msg_digest : Bytes,
+  hash_name : String,
+) -> Bool {
+  if big_is_zero(key.n) || big_is_zero(key.e) {
+    return false
+  }
+  let h_len = msg_digest.length()
+  if h_len == 0 {
+    return false
+  }
+  let salt_len = h_len
+  let modulus_bytes = big_to_be_bytes(key.n)
+  let nbytes = modulus_bytes.length()
+  if signature.length() != nbytes {
+    return false
+  }
+  let sig_int = big_from_be_bytes(signature)
+  if big_cmp(sig_int, key.n) >= 0 {
+    return false
+  }
+  let m = big_mod_pow(sig_int, key.e, key.n)
+  let m_bytes = big_to_be_bytes(m)
+  // emBits = modBits - 1；emLen = ceil(emBits / 8)
+  let mod_bits = big_bit_length(key.n)
+  let em_bits = mod_bits - 1
+  if em_bits <= 0 {
+    return false
+  }
+  let em_len = (em_bits + 7) / 8
+  if m_bytes.length() > em_len {
+    return false
+  }
+  // EM = m 右对齐补齐为 emLen 字节（大端）。
+  let em : Array[Byte] = Array::make(em_len, b'\x00')
+  let dst = em_len - m_bytes.length()
+  for i = 0; i < m_bytes.length(); i = i + 1 {
+    em[dst + i] = m_bytes[i]
+  }
+  if em_len < h_len + salt_len + 2 {
+    return false
+  }
+  if em[em_len - 1] != b'\xbc' {
+    return false
+  }
+  let db_len = em_len - h_len - 1
+  // maskedDB 最高位必须为 0（8*emLen - emBits 位）。
+  let unused_bits = 8 * em_len - em_bits
+  if unused_bits > 0 {
+    let mask = (1 << (8 - unused_bits)) - 1
+    if (em[0].to_int() & (0xFF - mask)) != 0 {
+      return false
+    }
+  }
+  // H = EM 中 maskedDB 之后的 hLen 字节（EM = maskedDB || H || 0xbc）
+  let h : Array[Byte] = []
+  for i = db_len; i < em_len - 1; i = i + 1 {
+    h.push(em[i])
+  }
+  let h_bytes = Bytes::from_array(h[:])
+  // dbMask = MGF1(H, dbLen)
+  let db_mask = mgf1(h_bytes, db_len, hash_name)
+  if db_mask.length() != db_len {
+    return false
+  }
+  // DB = maskedDB XOR dbMask
+  let db : Array[Byte] = []
+  for i = 0; i < db_len; i = i + 1 {
+    db.push((em[i].to_int() ^ db_mask[i].to_int()).to_byte())
+  }
+  if unused_bits > 0 {
+    let mask = (1 << (8 - unused_bits)) - 1
+    db[0] = (db[0].to_int() & mask).to_byte()
+  }
+  // DB = PS(全 0) || 0x01 || salt
+  let ps_len = db_len - salt_len - 1
+  if ps_len < 0 {
+    return false
+  }
+  for i = 0; i < ps_len; i = i + 1 {
+    if db[i] != b'\x00' {
+      return false
+    }
+  }
+  if db[ps_len] != b'\x01' {
+    return false
+  }
+  // salt = DB 尾部 saltLen 字节
+  let salt : Array[Byte] = []
+  for i = ps_len + 1; i < db_len; i = i + 1 {
+    salt.push(db[i])
+  }
+  // H' = Hash(0x00 * 8 || mHash || salt)
+  let mp : Array[Byte] = []
+  for i = 0; i < 8; i = i + 1 {
+    mp.push(b'\x00')
+  }
+  for b in msg_digest {
+    mp.push(b)
+  }
+  for b in salt {
+    mp.push(b)
+  }
+  let hp = if hash_name == "SHA-256" {
+    sha256(Bytes::from_array(mp[:]))
+  } else if hash_name == "SHA-512" {
+    sha512(Bytes::from_array(mp[:]))
+  } else {
+    return false
+  }
+  if hp.length() != h_len {
+    return false
+  }
+  for i = 0; i < h_len; i = i + 1 {
+    if hp[i] != h_bytes[i] {
+      return false
+    }
+  }
+  true
+}
+
+///|
+/// MGF1 掩码生成（RFC 8017 附录 B.2.1）：T = Hash(seed || I2OSP(counter, 4)) 拼接至 mask_len。
+fn mgf1(seed : Bytes, mask_len : Int32, hash_name : String) -> Bytes {
+  let out : Array[Byte] = []
+  let mut counter = 0U
+  while out.length() < mask_len {
+    let block : Array[Byte] = []
+    for b in seed {
+      block.push(b)
+    }
+    block.push(((counter >> 24) & 0xFF).to_byte())
+    block.push(((counter >> 16) & 0xFF).to_byte())
+    block.push(((counter >> 8) & 0xFF).to_byte())
+    block.push((counter & 0xFF).to_byte())
+    let d = if hash_name == "SHA-256" {
+      sha256(Bytes::from_array(block[:]))
+    } else if hash_name == "SHA-512" {
+      sha512(Bytes::from_array(block[:]))
+    } else {
+      b""
+    }
+    if d.length() == 0 {
+      return b""
+    }
+    for b in d {
+      if out.length() >= mask_len {
+        break
+      }
+      out.push(b)
+    }
+    counter = counter + 1
+  }
+  Bytes::from_array(out[:])
+}

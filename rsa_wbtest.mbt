@@ -132,3 +132,44 @@ test "T-W6-RSA-pkcs1: unsupported hash name fails (fail-closed)" {
   )
   assert_true(!rsa_verify_pkcs1(key, sig, digest, "SHA-1"))
 }
+
+///|
+test "T-W6-RSA-pss: known vector (EMSA-PSS-VERIFY)" {
+  let key = match
+    rsa_public_key_from_spki(
+      bytes_from_hex(
+        "30819f300d06092a864886f70d010101050003818d0030818902818100cabfbdcec805d6844ee428427e5aade60695a99d58d0a9c0d4c8acc224c1e594b7565f638f227f5a990bd7ffacad35d236c6918195eecc7bf17dd4ed5e7e693da3f2c7f0e117c281a0709f907921ff9d90be75751d09b5ac00dfbb8d755b1da5b338948209789756ef4535cd0e3b405ee7b9ca8e92fb907b0409140d38cc726f0203010001",
+      ),
+    ) {
+    Some(k) => k
+    None => fail("spki parse failed")
+  }
+  let sig = bytes_from_hex(
+    "30c19d0c54e4a559b008b4b45242575d00530530b42ff47c8ef5835759356cd968336a48d2dcf50d99773bda03427be4c4daf0cb87c903bf04d5e26763cafe3b217b4e74c80e7aa56294a4b915b35f0180893f6384b7295df6564c5274442d6d5c37777d78cd85d535abd8245d2b145a3c7acfc01af2e165afd7ef2fbc8b698b",
+  )
+  let dg = bytes_from_hex(
+    "5d1961d33b1b26035f275173addb3ed49f4f1912bf9b8ea2bcb6df88480c5057",
+  )
+  assert_true(
+    rsa_verify_pss(key, sig, dg, "SHA-256"),
+    msg="PSS known vector verifies",
+  )
+  // 篡改签名的最后一位必须失败（fail-closed）。
+  let bad : Array[Byte] = []
+  for b in sig {
+    bad.push(b)
+  }
+  bad[bad.length() - 1] = (bad[bad.length() - 1].to_int() ^ 0x01).to_byte()
+  assert_true(
+    !rsa_verify_pss(key, Bytes::from_array(bad[:]), dg, "SHA-256"),
+    msg="tampered PSS fails",
+  )
+  // 错配摘要必须失败。
+  let wrong = bytes_from_hex(
+    "0000000000000000000000000000000000000000000000000000000000000000",
+  )
+  assert_true(
+    !rsa_verify_pss(key, sig, wrong, "SHA-256"),
+    msg="wrong digest fails",
+  )
+}
