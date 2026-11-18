@@ -141,7 +141,7 @@ fn parse_verity_value(block_id : UInt32, raw : Bytes) -> VerityInfo {
 ///|
 /// 字节切片 → 小写 hex 字符串。
 fn bytes_to_hex(b : BytesView) -> String {
-  let out = StringBuilder(size_hint=b.length() * 2)
+  let out = StringBuilder(capacity=b.length() * 2)
   for byte in b {
     let v = byte.to_int()
     let hi = (v >> 4) & 0xF

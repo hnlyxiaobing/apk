@@ -385,7 +385,7 @@ async fn cmd_extract(rest : ArrayView[String]) -> Int32 {
       }
     }
     let dest = if all { out_path + "/" + name } else { out_path }
-    @fs.mkdir(parent_dir(dest), recursive=true, allow_exist=true)
+    @fs.mkdir(parent_dir(dest), recursive=true, allow_existing=true)
     @fs.write_binary(dest, bytes)
     out_names.push(name)
     out_sizes.push(bytes.length())

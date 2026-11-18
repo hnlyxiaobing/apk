@@ -1,7 +1,8 @@
 # apk · APK 容器解析
 
 > 独立发布单元 ｜ L1 逆向输入 ｜ `preferred_target = wasm` ｜ Apache-2.0
-> 状态：`moon test` **187/187** 通过（2026-11-18 本机实测，另有 8 个 `#skip` 用例不计入）；本文件是本仓库**唯一**说明文档。
+> 状态：`moon test` **211/211** 通过（2026-11-18 本机实测，另有 8 个 `#skip` 用例不计入）；本文件是本仓库**唯一**说明文档。
+> 最新能力：W5-后续 ✓（fs-verity Merkle 根重算，`Apk::verity_tree_check`）；W6-后续里程碑 a ✓（ECDSA P-256/P-384 曲线原语，`ecdsa_verify_raw`）；API 影响为纯加法（新增 1 enum + 1 struct + 2 pub fn）。
 > 公开 API 以 `pkg.generated.mbti` 为准（由 `moon info` 生成，禁手工编辑）；加法性变更须登记簿记 + 快照审阅 + 快照门禁。
 
 ## 1. 定位与边界
@@ -37,6 +38,8 @@
 ## 3. 公开 API 索引（自动抽取 `pkg.generated.mbti` 的 `pub` 声明行；完整字段见快照）
 
 ```text
+pub fn ecdsa_verify_raw(EcCurve, String, String, String, String, String) -> Bool
+
 pub fn parse_certificate(Bytes) -> CertificateInfo raise ApkError
 pub fn parse_resources_arsc(Bytes) -> ResTable raise ApkError
 pub(all) enum Abi {
@@ -53,8 +56,10 @@ pub fn Apk::resource_table_full(Self) -> ResTable? raise ApkError
 pub fn Apk::signature_checks(Self) -> Array[SignatureCheck] raise ApkError
 pub fn Apk::signatures(Self) -> Array[SignatureInfo] raise ApkError
 pub fn Apk::verify_signatures(Self) -> Array[SignatureVerification] raise ApkError
+pub fn Apk::verity_tree_check(Self) -> VerityTreeCheck? raise ApkError
 pub(all) struct CertificateInfo {
 pub(all) struct DexEntry {
+pub(all) enum EcCurve {
 pub(all) enum ElfClass {
 pub(all) struct ElfInfo {
 pub(all) struct ElfSymbol {
@@ -102,7 +107,8 @@ pub(all) struct ZipEntryRef {
 ## 6. 风险与未决
 
 - `resources.arsc` 完整展开的**语义归属**已裁决判给外部 `axml` 库（见 §2 决策行）；本库 `resource_table_full` / `parse_resources_arsc` 冻结不再增强，无「未裁决去重」遗留。
-- `verify_signatures()`（W6，公钥验签）已于 2026-11-18 裁决立项，采用**仅 RSA 降级**（方案 B）：M6-RSA-a/b 已落地 v1 CMS 与 v2/v3/v3.1 的 RSA（PKCS#1 v1.5 + PSS）真验签；M6-6 oracle 差分 harness（`tests/apksigner_oracle_diff.py`）已于 2026-11-18 实跑 build-tools r34：3 真 RSA + 3 篡改 **6/6 AGREE**（见 CHANGELOG W6-hardening-3）。oracle 属外部依赖（需 Android SDK build-tools），本地缺失时按纪律显式 SKIPPED（exit 78）、不计入通过；ECDSA 分支 `crypto_verified` 恒 false（fail-closed，`#skip` 立项），`signature_verified` 恒 false 语义不变。
+- `verify_signatures()`（W6，公钥验签）已于 2026-11-18 裁决立项，采用**仅 RSA 降级**（方案 B）：M6-RSA-a/b 已落地 v1 CMS 与 v2/v3/v3.1 的 RSA（PKCS#1 v1.5 + PSS）真验签；M6-6 oracle 差分 harness（`tests/apksigner_oracle_diff.py`）已于 2026-11-18 实跑 build-tools r34：3 真 RSA + 3 篡改 **6/6 AGREE**（见 CHANGELOG W6-hardening-3）。oracle 属外部依赖（需 Android SDK build-tools），本地缺失时按纪律显式 SKIPPED（exit 78）、不计入通过。
+  - **W6-后续 里程碑 a（2026-11-18）**：ECDSA P-256/P-384 曲线原语已以纯 MoonBit Jacobian 坐标自研落地，公开入口 `ecdsa_verify_raw` 通过 RFC 6979 A.2.5/A.2.6 标准向量全绿（11 个黑盒+白盒测试）。里程碑 b（接 v2/v3/v3.1）与 c（v1 CMS）留空，`crypto_verified` 对 ECDSA 依旧恒 false（fail-closed），`signature_verified` 恒 false 语义不变。
 - 第三方 APK 许可不明，禁止入库；受控自建样本与哈希登记见本仓库 `tests/fixtures/`。
 - `zip@0.1.2` 单人维护、star=0 的 bus factor 风险已登记，不阻断使用。
 

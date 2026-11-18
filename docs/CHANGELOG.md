@@ -342,3 +342,38 @@
 ### 门禁
 
 `moon check --deny-warn` / `moon build` / `moon test`（187/187 全绿）/ `moon fmt --check` / `moon info` + mbti **零 diff**，全绿。
+
+### 2026-11-18 — W5-后续：fs-verity Merkle 树重算（从悬空缺口到闭合能力）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | W5-后续 verity 树重算：AOSP 布局核实 + fs-verity Merkle 根重算 + v2/v3 verity 摘要比对 |
+| 新增 pub 声明 | `pub(all) struct VerityTreeCheck`（8 字段）+ `pub fn Apk::verity_tree_check(Self) -> VerityTreeCheck? raise ApkError` |
+| 快照 diff 结论 | **纯加法**（mbti +20 行，0 modify/delete；改动文件 `apk_test.mbt` +44 `scheme_value_with_verity_digest` 私有 helper） |
+| 前置核实 | 联网核对 AOSP `VerityBuilder.java` 确认：块 ID `0x42726577` 是 `VERITY_PADDING_BLOCK_ID`（填充），真实 verity 根在 v2/v3 signed data 的 `0x0421` digest（40B = root_hash[32] + source_len[8]）；按 AOSP apk-verity 变体（SHA-256、8B 零盐、4096 块、扣除签名块、EOCD 偏移改写）落地 |
+| 新增文件 | `verity_tree.mbt`（277 行，fs-verity 源构造 + Merkle 根 + 公开入口）、`verity_tree_test.mbt`（黑盒 2 用例）、`verity_tree_wbtest.mbt`（白盒 5 用例，含端到端 `tree_recomputed_ok==true` + 篡改 fail-closed + 单/多块根交叉核对） |
+| 交叉校验 | `docs/verify_verity_ref.py`（Python 1:1 对照，单块/多块/内部层均与 AOSP `calculateVerityLevelOffset` 一致）+ `docs/verify_verity_e2e.py`（端到端构造含真实根的 APK，自洽验证） |
+| 风险消除 | 草案「最易重算通过但口径错误」风险通过 AOSP 源码核实 + 独立 Python 对照消除；`tree_recomputed_ok` 从既有 `VerityInfo` 恒 false 的人工钉死，转变为 `VerityTreeCheck` 的真断言 |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（211/211 全绿，+24 用例）/ `moon fmt --check` / `moon info` + mbti **纯加法 diff**（+20 行），全绿。
+
+### 2026-11-18 — W6-后续 里程碑 a：ECDSA P-256/P-384 曲线原语
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | W6-后续 ECDSA 真验签·里程碑 a：secp256r1/secp384r1 曲线原语 + RFC 6979 向量（不接 v2/v3/v1，里程碑 b/c 留空） |
+| 新增 pub 声明 | `pub(all) enum EcCurve { P256 P384 Unknown }` + `pub fn ecdsa_verify_raw(EcCurve, String, ...) -> Bool` |
+| 快照 diff 结论 | **纯加法**（mbti 新增 3 处纯增声明；改动文件仅 `ecdsa_test.mbt`、`ecdsa_wbtest.mbt` 为新增，`apk_test.mbt` 与 `verity_tree_wbtest.mbt` 为私有 helper 新增/修复） |
+| 实现 | `ecdsa.mbt`（433 行）：域参数（NIST FIPS 186-4 / SEC 2）、费马模逆、模加/减/乘、Jacobian 坐标点加/双倍/标量点乘（1 次模逆 / scalar mul）、ECDSA 验签原语（r,s 越界检查 + 公钥曲线验证 + v==r 判等） |
+| 向量 | 黑盒 `ecdsa_test.mbt` 6 用例：P-256/P-384 RFC 6979 A.2.5/A.2.6 真签名通过 + r 篡改 fail-closed + s 篡改 fail-closed + 未知曲线拒绝 + 畸形十六进制/空串不 panic + r=n 越界/坏公钥 fail-closed；白盒 `ecdsa_wbtest.mbt` 7 用例：域参数位长 + on-curve + 点乘 x·G==公钥（P-256/P-384）+ 1·G==G + 0·G==infinity + 模逆自反 + 真验签通过（P-256/P-384）+ r/s 篡改 + 边界 fail-closed |
+| 门禁聚合 | `ecdsa_verify_raw` 本身即合法公开入口，承载内部曲线原语引用链，通过 `moon check --deny-warn` unused_value 门禁（无需接 v2/v3/v1） |
+| 性能 | Jacobian 坐标 + 费马模逆，211 总测试 ~80 秒（wasm debug） |
+| 里程碑 b/c | 留空，不列入本轮；`crypto_verified` 对 ECDSA 依旧恒 false，`verify_signatures` 不接 ECDSA 分支 |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（211/211 全绿，+13 用例）/ `moon fmt --check` / `moon info` + mbti **纯加法 diff**（+20 行），全绿。

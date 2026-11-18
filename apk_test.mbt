@@ -226,6 +226,50 @@ fn scheme_value(cert : Bytes, sdk_tail : Int32) -> Bytes {
 }
 
 ///|
+/// 签名方案值（fixture），digests 序列含**一个** verity 内容摘要记录（W5-后续）。
+///
+/// 与 `scheme_value` 同构，区别仅在 signed_data 的 digests 序列：不为空，而是含一个
+/// `u32 算法ID=0x0421 u32 摘要长 摘要` 记录（值应为 40 字节 = root_hash[32] || source_len(i64 小端)）。
+/// `sdk_tail` 语义与 `scheme_value` 一致（v2=0、v3=8、v3.1=8）。
+fn scheme_value_with_verity_digest(
+  cert : Bytes,
+  verity_digest : Bytes,
+  sdk_tail : Int32,
+) -> Bytes {
+  let ds : Array[Byte] = []
+  push_u32(ds, verity_digest.length() + 8)
+  push_u32(ds, 0x0421)
+  push_u32(ds, verity_digest.length())
+  push_bytes(ds, verity_digest)
+  let ds_b = Bytes::from_array(ds[:])
+  let cs : Array[Byte] = []
+  push_u32(cs, cert.length())
+  push_bytes(cs, cert)
+  let cs_b = Bytes::from_array(cs[:])
+  let sd : Array[Byte] = []
+  push_u32(sd, ds_b.length())
+  push_bytes(sd, ds_b)
+  push_u32(sd, cs_b.length())
+  push_bytes(sd, cs_b)
+  for i = 0; i < sdk_tail; i = i + 1 {
+    sd.push(b'\x00')
+  }
+  push_u32(sd, 0)
+  let sd_b = Bytes::from_array(sd[:])
+  let signer : Array[Byte] = []
+  push_u32(signer, sd_b.length())
+  push_bytes(signer, sd_b)
+  push_u32(signer, 0)
+  push_u32(signer, 0)
+  let signer_b = Bytes::from_array(signer[:])
+  let value : Array[Byte] = []
+  push_u32(value, signer_b.length() + 4)
+  push_u32(value, signer_b.length())
+  push_bytes(value, signer_b)
+  Bytes::from_array(value[:])
+}
+
+///|
 /// 最小 `resources.arsc`：ResTable 头 + 全局字符串池 chunk（chunk 尺寸可注入畸形，
 /// 文件本身始终 4 字节对齐，确保畸形被定位到 chunk 而不是文件级截断）。
 fn build_arsc(pool_size : Int32) -> Bytes {

@@ -6,6 +6,8 @@ import {
 }
 
 // Values
+pub fn ecdsa_verify_raw(EcCurve, String, String, String, String, String) -> Bool
+
 pub fn parse_certificate(Bytes) -> CertificateInfo raise ApkError
 
 pub fn parse_resources_arsc(Bytes) -> ResTable raise ApkError
@@ -55,6 +57,7 @@ pub fn Apk::signature_checks(Self) -> Array[SignatureCheck] raise ApkError
 pub fn Apk::signatures(Self) -> Array[SignatureInfo] raise ApkError
 pub fn Apk::verify_signatures(Self) -> Array[SignatureVerification] raise ApkError
 pub fn Apk::verity(Self) -> VerityInfo? raise ApkError
+pub fn Apk::verity_tree_check(Self) -> VerityTreeCheck? raise ApkError
 pub impl ContainerIndex for Apk
 
 pub(all) struct CertificateInfo {
@@ -79,6 +82,12 @@ pub(all) struct DartSnapshotRef {
 pub(all) struct DexEntry {
   name : String
   bytes : Bytes
+}
+
+pub(all) enum EcCurve {
+  P256
+  P384
+  Unknown
 }
 
 pub(all) enum ElfClass {
@@ -296,6 +305,17 @@ pub(all) struct VerityInfo {
   tree_recomputed_ok : Bool
 }
 pub fn VerityInfo::to_repr(Self) -> @debug.Repr
+
+pub(all) struct VerityTreeCheck {
+  block_id : UInt32
+  hash_algorithm : String
+  block_size : Int32
+  salt_hex : String
+  declared_root_hash_hex : String
+  recomputed_root_hash_hex : String
+  tree_recomputed_ok : Bool
+  source_len : UInt64
+}
 
 pub(all) struct ZipEntryRef {
   name : String

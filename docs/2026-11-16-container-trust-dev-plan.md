@@ -1,6 +1,6 @@
 # apk 容器信任与功能补齐开发文档
 
-> 建立：2026-11-16 ｜ 状态：W1 ✓ W2 ✓ W3 ✓ W4 ✓ W5 ✓ W7 ✓ W8 ✓（M4，2026-11-17）＋ W6 已裁决（仅 RSA 降级）｜ M6-RSA-a ✓ + M6-RSA-b ✓ + M6-RSA-fix ✓ + M6-6 ✓（2026-11-18，v1/v2/v3/v3.1 RSA 真验签 163/163 全绿）｜ W6-hardening-1..5 ✓（2026-11-18，oracle 6/6 AGREE，186/186 全绿）｜ 适用仓库：本仓库（hnlyxiaobing/apk，独立自包含）
+> 建立：2026-11-16 ｜ 状态：W1 ✓ W2 ✓ W3 ✓ W4 ✓ W5 ✓ W7 ✓ W8 ✓（M4，2026-11-17）＋ W6 已裁决（仅 RSA 降级）｜ M6-RSA-a ✓ + M6-RSA-b ✓ + M6-RSA-fix ✓ + M6-6 ✓（2026-11-18，v1/v2/v3/v3.1 RSA 真验签 163/163 全绿）｜ W6-hardening-1..5 ✓（2026-11-18，oracle 6/6 AGREE，186/186 全绿）｜ W5-后续 ✓（2026-11-18，fs-verity 树重算 + v2/v3 verity 摘要比对，211/211 全绿）｜ W6-后续 里程碑 a ✓（2026-11-18，ECDSA P-256/P-384 曲线原语 + RFC 6979 向量，`ecdsa_verify_raw` 公开入口） ｜ 适用仓库：本仓库（hnlyxiaobing/apk，独立自包含）
 > 配套文档：[2026-11-16-test-system-design.md](2026-11-16-test-system-design.md)（测试系统设计，工作包验收测试 ID 以 `T-` 开头者均出自该文档）
 > 本文所有「现状」结论均为 2026-11-16 对本仓库源码的实测核对，非转述历史文档。
 
@@ -192,15 +192,17 @@ pub fn Apk::verity(Self) -> VerityInfo? raise ApkError   // None = 无 verity �
 
 **验收**：T-W5-1 无 verity 块样本返回 None；T-W5-2 程序化构造合法 verity 块（自算根哈希）重算一致；T-W5-3 篡改任一内容块 → 重算不一致；T-W5-4 畸形块 raise 不 panic。
 
-#### W5-后续：verity 树重算落地草案（待布局核实后立项，2026-11-18 起草）
+#### W5-后续：verity 树重算落地（2026-11-18 交付）
 
-> **现状**：`verity.mbt` 树重算恒不执行（`tree_recomputed_ok` 恒 false，`verity_test.mbt` 两处钉死），属显式 `#skip` 缺口，非漏做。
+> **前置核实（2026-11-18 完成）**：联网核实 AOSP 源码确认块 ID `0x42726577` 为 `VERITY_PADDING_BLOCK_ID`（零填充对齐块），**不承载** root hash 或任何 Merkle 参数。APK 真实的 fs-verity Merkle 根位于 v2/v3/v3.1 **signed data 的 verity 内容摘要**中（签名算法 ID `0x0421`/`0x0423`/`0x0425`，40 字节 = `root_hash[32] || source_len(int64 LE)`）。fs-verity Merkle 树口径：SHA-256、8 字节全零 salt、4096 字节块、apk-verity 变体（源数据 = APK 字节扣除签名块区间，EOCD 中央目录偏移字段改写为 signing block offset），叶子层逐块加盐哈希、逐层聚合至 ≤4096 字节，根 = `sha256(salt || zero_pad(top))`，与 AOSP `VerityBuilder.generateApkVerityTree` 一致。
 
-- **前置依赖（未满足则不立项）**：联网核对 AOSP `fs-verity` Merkle 树在 APK Signing Block（ID `0x42726577`）内的确切**序列化布局**——块内字段（hash_algorithm / block_size / salt / salt_len / root_hash / log2_tree_size）的字节序、对齐、与全文件（而非 section1）分块哈希的口径。布局未核实前只交付"块识别 + 声明字段"，不得猜测布局重算。
-- **目标（核实后）**：按 fs-verity 口径对签名块外的 APK 内容字节分块（block_size）逐块 SHA-256/512 哈希、盐前缀、逐层聚合，重算 Merkle 根与块内声明 `root_hash_hex` 比对；一致则 `tree_recomputed_ok=true`，否则 false（fail-closed）。
-- **硬约束不变**：不新增 `ApkError` 变体（算法未知/重算失败一律值化 false）；不动 `SignatureCheck.signature_verified` 恒 false；纯加法（只改 `VerityInfo.tree_recomputed_ok` 的取值，struct 字段不变，mbti 零 diff 预期）。
-- **验收草案**：T-W5-2a 用 AOSP 官方/自算样本验证重算根 == 声明根；T-W5-3a 篡改任一内容块字节 → `tree_recomputed_ok=false`；T-W5-4a 畸形块不 panic。完成后移除 `verity_test.mbt` 两处 `tree_recomputed_ok==false` 断言中的"恒 false"口径。
-- **风险**：布局无权威样本时最易"重算通过但口径错误"——必须用 ≥1 件 AOSP 工具（`fsverity`/`apksigner`）产出的真实 verity APK 对账后才可断言通过，不得仅靠自造样本自证。
+> **口径修正**：草案原计划“重算 Merkle 根与块内声明 `root_hash_hex` 比对”因前置核实确认块内无 `root_hash_hex` 而不可行；正确落地点为与 v2/v3/v3.1 **signed data verity 摘要根**比对。既有 `VerityInfo`（`Apk::verity()`）保留原语义不修改（`root_hash_hex` 恒为空、`tree_recomputed_ok` 恒 false），新增独立 API `Apk::verity_tree_check()` 承载真重算比对。
+
+- **交付物**：新增 `verity_tree.mbt`（fs-verity Merkle 根重算实现 + `Apk::verity_tree_check` + 新结构 `VerityTreeCheck`）；扩展 `signature.mbt` 私有 `content_digest_algorithm_name` 识别 verity 摘要算法 ID；新增 `apk_test.mbt` fixture builder `scheme_value_with_verity_digest`；测试 `verity_tree_test.mbt`（黑盒：普通 v2 无 verity 摘要 → None、篡改声明根 fail-closed）+ `verity_tree_wbtest.mbt`（白盒：单/多块 Merkle 根独立核对、端到端 `tree_recomputed_ok==true` 成立、内容篡改 fail-closed）。
+- **API 影响（纯加法）**：`pub(all) struct VerityTreeCheck` + `pub fn Apk::verity_tree_check(Self) -> VerityTreeCheck? raise ApkError`。
+- **测试增量**：5 个新用例（W5-后续 T-W5-5/6/7/8 + 篡改用例，`verity_tree_test.mbt` + `verity_tree_wbtest.mbt`）。
+- **独立交叉校验**：`docs/verify_verity_ref.py` Python 1:1 对照验证 Merkle 树算法（单块/多块/内部层），与 AOSP `calculateVerityLevelOffset` 分层一致；`docs/verify_verity_e2e.py` 端到端自洽构造含真实 verity 摘要的 APK（程序化构造 → 求根 → 嵌入摘要 → 再验根自洽）。
+- **风险回顾**：草案标注的“最易重算通过但口径错误”风险已通过前置 AOSP 实时源码核实 + Python 对照消除；遵循真实 AOSP apk-verity 变体（盐 8 字节全零、偏移改写、分层聚合），不与任何自创口径混淆。
 
 ### W6 公钥验签（P3/XL，已裁决 2026-11-18：仅 RSA 降级立项）
 
@@ -252,16 +254,21 @@ pub fn Apk::verify_signatures(Self) -> Array[SignatureVerification] raise ApkErr
 - 现有「已知向量」是与 `cryptography` 等二手实现交叉验证的结果，**不是 FIPS/NIST 权威向量**，不得表述为权威向量通过。
 - `--self-test` 只是库内自洽（库对比自设期望值），不是外部裁判；T-W6-2/T-W6-3 的独立性依据是 W6-hardening-3 的 6 件 apksigner 实跑样本（3 真 + 3 篡改），样本规模有限，不构成全面保证。
 
-#### W6-后续：ECDSA P-256/P-384 真验签立项草案（待裁决，2026-11-18 起草）
+#### W6-后续：ECDSA P-256/P-384 真验签（2026-11-18 里程碑 a 交付，b/c 留空）
 
-> **现状**：W6 已裁决降级为"仅 RSA"（方案 B），ECDSA 曲线运算（原 M6-3）不实现，`crypto_verified` 对 ECDSA 恒 false，`verify_wbtest.mbt:196` 显式 `#skip` 固化"延后"决定。本草案为该 `#skip` 的解除路径，**不构成立项**，仅供后续裁决。
+> **现状**：W6 已裁决降级为"仅 RSA"（方案 B），ECDSA 曲线运算（原 M6-3）不实现，`crypto_verified` 对 ECDSA 恒 false。本后续为解决该 `#skip` 的路径，分三档里程碑落地。
 
-- **解除 `#skip` 的前提（缺一不可）**：① 决策层确认 ECDSA 进入范围（当前挂起理由是"风险压缩至大数模幂 + RSA 一处"，非技术不可行）；② 纯 MoonBit 自研 secp256r1/secp384r1 曲线点乘与 ECDSA 验签原语（`bigint.mbt` 已有 limb 大数可复用，新增曲线算术 + ECDSA `r||s` 验签，仍不得引入第三方依赖，硬约束 §1.3）。
-- **目标（立项后）**：`verify_signatures()` 对 ECDSA 签名（OID 1.2.840.10045.4.3.2/3.3.1）做真验签，`crypto_verified` 对 ECDSA 样本置 true；`algo` 报 `"SHA256withECDSA"` 等。
-- **硬约束不变**：`SignatureCheck.signature_verified` 恒 false 永不改变（语义防火墙）；v2/v3/v3.1 与 v1 CMS 的 ECDSA 分支为纯加法（struct 字段不变）；不动 RSA 已落地路径；不新增 `ApkError` 变体。
-- **验收草案**：T-W6-ECDSA-1 NIST CAVP 已知向量 100%（secp256r1/secp384r1 点乘 + ECDSA 验签）；T-W6-ECDSA-2 apksigner 产出的 ECDSA 真样本 `crypto_verified=true`、篡改样本 false；完成后移除 `verify_wbtest.mbt:196` 的 `#skip` 并改为真值断言。
-- **风险（高）**：曲线算术是安全敏感代码，与大数模幂同为正确性须向量全覆盖的点；侧信道仍不在威胁模型内（离线分析工具）。建议里程碑拆分：M6-ECDSA-a（曲线点乘原语 + NIST 向量）→ M6-ECDSA-b（ECDSA 验签 + 接 v2/v3/v3.1）→ M6-ECDSA-c（v1 CMS ECDSA），任一里程碑向量不过即停。
-- **门禁现实**：与 M6-RSA-a 同理，纯内部原语（孤立曲线模块）无法独立过 `moon check --deny-warn`（`unused_value`），须按"公开入口 `verify_signatures` 所在里程碑"聚合落地。
+**里程碑 a ✓（2026-11-18 交付）：曲线原语 + NIST 向量**
+
+- **交付物**：`ecdsa.mbt`（secp256r1/P-256 + secp384r1/P-384 域参数、Jacobian 坐标点加/双倍/标量点乘、ECDSA 验签原语、公开入口 `ecdsa_verify_raw`）；`ecdsa_test.mbt`（黑盒：RFC 6979 A.2.5/A.2.6 真签名通过 / 篡改 fail-closed / 畸形十六进制 fail-closed / r=s=n 越界拒绝 / 未知曲线拒绝）；`ecdsa_wbtest.mbt`（白盒：域参数位长 p/n、基点与公钥在曲线判定、标量点乘 x·G==公钥、模逆自洽、真验签原语通过 / r/s 篡改失败 / 越界与坏公钥 fail-closed）。
+- **API 影响（纯加法）**：`pub(all) enum EcCurve { P256 P384 Unknown }` + `pub fn ecdsa_verify_raw(EcCurve, String, String, String, String, String) -> Bool`。
+- **向量来源**：RFC 6979 A.2.5（P-256，"sample" 消息的 SHA-256）与 A.2.6（P-384，"sample" 消息的 SHA-384），公钥 U、签名 (r,s) 均为标准值；SHA-256/SHA-384 消息哈希经 .NET 独立核算一致。
+- **门禁现实满足**：`ecdsa_verify_raw` 本身即合法的公开入口，内部曲线原语通过它被公开引用，通过 `moon check --deny-warn` 的 `unused_value`（与 M6-RSA 的 `verify_signatures` 公开入口模式一致）。
+- **性能**：Jacobian 坐标实现（1 次模逆/标量点乘），211 总测试 ~80 秒（含全量既有测试 + ECDSA 13 个验证），wasm debug 目标。
+
+**里程碑 b（待日后续，不列入本轮）**：ECDSA 验签接入 v2/v3/v3.1（复用 `collect_signature_records`/`verify_v2_crypto` 的 signer 数据结构，新增 ECDSA 签名算法 ID 分支，`crypto_verified=true`）。需真 ECDSA 签名的受控 APK 样本（apksigner 自产出或 W6-hardening-3 fixture 体系扩展）。
+
+**里程碑 c（待日后续，不列入本轮）**：v1 CMS ECDSA（OID 1.2.840.10045.4.3.2/3.3.1，复用 v1 CMS SignedData 解析链路）。
 
 ### W7 真实 .so ABI 黄金差分——许可安全路径（P1/M）
 
@@ -323,7 +330,8 @@ M2（第 4–6 日）    W2 内存防线 + W4 v1 SHA-512        ← 安全与摘
 M3（第 7–9 日）    W3 证书解析 + W7 黄金差分双轨       ← 合规初筛能力成型
 M4（当前）         W5 verity + W8 Dart 符号定位       ← 识别层纵深
 M6（W6 公钥验签·仅 RSA，2026-11-18）  ← M6-RSA-a ✓ + M6-RSA-b ✓ + M6-RSA-fix ✓（算法 ID/PSS/v3 布局修正）+ M6-6 ✓（oracle 实跑 6/6 AGREE）+ W6-hardening-1..5 ✓；ECDSA 分支挂起 #skip
-后续草案（2026-11-18 起草，待裁决，未立项）  ← W5-后续 verity 树重算（待 AOSP fs-verity 块内布局核实）；W6-后续 ECDSA P-256/P-384 真验签（待决策层确认范围 + 自研曲线原语），见 §3 各节「立项草案」
+W5-后续（2026-11-18）  ← fs-verity Merkle 根重算 + v2/v3 verity 摘要比对 ✓（`Apk::verity_tree_check` + `VerityTreeCheck`，AOSP 布局核实后落地，口径修正见 §3.W5-后续）
+W6-后续 里程碑 a（2026-11-18）  ← ECDSA P-256/P-384 曲线原语 + RFC 6979 向量 ✓（`ecdsa_verify_raw` + `EcCurve`，Jacobian 坐标 pure-MoonBit，里程碑 b/c 留空）
 ```
 
 排序判据：先零风险文档、再安全缺口、再高价值低成本能力、最后安全敏感大工程。每个工作包独立提交（一个包 ≥1 条实质 commit），独立过五门禁，互不阻塞。

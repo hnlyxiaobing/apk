@@ -572,7 +572,7 @@ fn arsc_decode_utf16(
   if off < 0 || units < 0 || off > limit || units > (limit - off) / 2 {
     raise ApkError::UnexpectedEof(off)
   }
-  let b = StringBuilder(size_hint=units)
+  let b = StringBuilder(capacity=units)
   let mut i = 0
   while i < units {
     let base = off + 2 * i
@@ -1121,7 +1121,7 @@ fn arsc_unpack_locale(
   let high = arsc_u8(data, off, limit)
   let low = arsc_u8(data, off + 1, limit)
   if (high & 0x80) == 0 {
-    let b = StringBuilder(size_hint=2)
+    let b = StringBuilder(capacity=2)
     if high != 0 {
       b.write_char(arsc_scalar(high, off))
       if low != 0 {
@@ -1134,7 +1134,7 @@ fn arsc_unpack_locale(
   let first = (low & 0x1F) + base - 1
   let second = (((low >> 5) | ((high & 0x03) << 3)) & 0x1F) + base - 1
   let third = ((high >> 2) & 0x1F) + base - 1
-  let b = StringBuilder(size_hint=3)
+  let b = StringBuilder(capacity=3)
   b.write_char(arsc_scalar(first, off))
   b.write_char(arsc_scalar(second, off))
   b.write_char(arsc_scalar(third, off))
@@ -1148,7 +1148,7 @@ fn arsc_ascii4(
   off : Int32,
   limit : Int32,
 ) -> String raise ApkError {
-  let b = StringBuilder(size_hint=4)
+  let b = StringBuilder(capacity=4)
   let mut i = 0
   while i < 4 {
     let c = arsc_u8(data, off + i, limit)
