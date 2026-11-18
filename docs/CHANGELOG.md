@@ -125,3 +125,19 @@
 - README §2 新增 2026-11-18 裁决行；§6 清理 arsc「未裁决去重」残留漂移；
 - dev-plan 状态行 + W6 节头 + §4 里程碑表 + 风险/止损段全部更新为方案 B；
 - 后续按 M6-1→M6-2→M6-4→M6-5→M6-6（仅 RSA）逐里程碑合入。
+
+### 2026-11-18 — M6-RSA-a（合并原 M6-1/2/4：大数+RSA PKCS#1 v1.5+v2/v3/v3.1 接入，公开入口落地）
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | M6-RSA-a：纯 MoonBit 无符号大数 + RSA PKCS#1 v1.5 验签原语 + DigestInfo + v2/v3/v3.1 SPKI 提取验签 |
+| 新增 pub 声明 | `pub(all) struct SignatureVerification`（scheme / structure_ok / digest_ok / crypto_verified / algo / detail）+ `pub fn Apk::verify_signatures(Self) -> Array[SignatureVerification] raise ApkError` |
+| 快照 diff 结论 | **纯加法**：mbti 新增 1 struct + 1 fn（共 10 行纯增），零 modify/delete |
+| 测试增量 | `bigint_wbtest.mbt`（142 个已知向量 + 边界：大数 add/sub/mul/mod/mod_pow/bit/cmp/hex/bytes 往返）+ `rsa_wbtest.mbt`（6 个：SHA-256/512 已知向量验签、篡改失败、错配摘要失败、不支持算法失败）+ `verify_wbtest.mbt`（8 个：v2/v3/v3.1 真验签通过、篡改失败、ECDSA fail-closed、`#skip` ECDSA 延后）+ `verify_test.mbt`（3 个：v1 fail-closed、无签名空数组、旧契约不变） |
+| 实现文件 | `bigint.mbt`（无符号大数 limb 表示、add/sub/mul/mod/mod_pow/bit/cmp/be_bytes）+ `rsa.mbt`（RSA PKCS#1 v1.5 verify + DigestInfo + SPKI 公钥提取）+ `verify.mbt`（`SignatureVerification` + `verify_signatures` + signer extraction）+ `signature.mbt`（SigRecord 新增 value_off/value_len） |
+| 聚合说明 | 因 `moon check --deny-warn` 的 `unused_value` 规则要求每个里程碑有非测试消费方，原 M6-1/2/4 三个纯内部里程碑合并为本档（公开入口 `verify_signatures` 为统一消费者）；范围不变，仅过程聚合 |
+
+### 门禁
+
+`moon check --deny-warn` / `moon build` / `moon test`（156/156 全绿，1 个 `#skip` 不计入）/ `moon fmt --check` / `moon info` + mbti **纯加法 diff**（10 行纯增），全绿。

@@ -53,6 +53,7 @@ pub fn Apk::resource_table(Self) -> ResourceTableRef? raise ApkError
 pub fn Apk::resource_table_full(Self) -> ResTable? raise ApkError
 pub fn Apk::signature_checks(Self) -> Array[SignatureCheck] raise ApkError
 pub fn Apk::signatures(Self) -> Array[SignatureInfo] raise ApkError
+pub fn Apk::verify_signatures(Self) -> Array[SignatureVerification] raise ApkError
 pub fn Apk::verity(Self) -> VerityInfo? raise ApkError
 pub impl ContainerIndex for Apk
 
@@ -272,6 +273,15 @@ pub(all) enum SignatureScheme {
   V2
   V3
   V31
+}
+
+pub(all) struct SignatureVerification {
+  scheme : SignatureScheme
+  structure_ok : Bool
+  digest_ok : Bool
+  crypto_verified : Bool
+  algo : String
+  detail : String
 }
 
 #derive(@debug.Debug)
