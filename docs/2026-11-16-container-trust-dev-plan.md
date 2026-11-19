@@ -1,6 +1,6 @@
 # apk 容器信任与功能补齐开发文档
 
-> 建立：2026-11-16 ｜ 状态：W1 ✓ W2 ✓ W3 ✓ W4 ✓ W5 ✓ W7 ✓ W8 ✓（M4，2026-11-17）＋ W6 已裁决（仅 RSA 降级）｜ M6-RSA-a ✓ + M6-RSA-b ✓ + M6-RSA-fix ✓ + M6-6 ✓（2026-11-18，v1/v2/v3/v3.1 RSA 真验签 163/163 全绿）｜ W6-hardening-1..5 ✓（2026-11-18，oracle 6/6 AGREE，186/186 全绿）｜ W5-后续 ✓（2026-11-18，fs-verity 树重算 + v2/v3 verity 摘要比对，211/211 全绿）｜ W6-后续 里程碑 a ✓（2026-11-18，ECDSA P-256/P-384 曲线原语 + RFC 6979 向量，`ecdsa_verify_raw` 公开入口） ｜ 适用仓库：本仓库（hnlyxiaobing/apk，独立自包含）
+> 建立：2026-11-16 ｜ 状态：W1 ✓ W2 ✓ W3 ✓ W4 ✓ W5 ✓ W7 ✓ W8 ✓（M4，2026-11-17）＋ W6 已裁决（仅 RSA 降级）｜ M6-RSA-a ✓ + M6-RSA-b ✓ + M6-RSA-fix ✓ + M6-6 ✓（2026-11-18，v1/v2/v3/v3.1 RSA 真验签 163/163 全绿）｜ W6-hardening-1..5 ✓（2026-11-18，oracle 6/6 AGREE，186/186 全绿）｜ W5-后续 ✓（2026-11-18，fs-verity 树重算 + v2/v3 verity 摘要比对，211/211 全绿）｜ W6-后续 里程碑 a/b/c ✓（2026-11-18，ECDSA P-256/P-384 曲线原语 + RFC 6979 向量 + 接入 v2/v3/v3.1 与 v1 CMS，`ecdsa_verify_raw` 公开入口；当前 `moon test` 221/221 全绿） ｜ 适用仓库：本仓库（hnlyxiaobing/apk，独立自包含）
 > 配套文档：[2026-11-16-test-system-design.md](2026-11-16-test-system-design.md)（测试系统设计，工作包验收测试 ID 以 `T-` 开头者均出自该文档）
 > 本文所有「现状」结论均为 2026-11-16 对本仓库源码的实测核对，非转述历史文档。
 
@@ -206,7 +206,7 @@ pub fn Apk::verity(Self) -> VerityInfo? raise ApkError   // None = 无 verity �
 
 ### W6 公钥验签（P3/XL，已裁决 2026-11-18：仅 RSA 降级立项）
 
-> **裁决结论（2026-11-18，方案 B）**：立项，但**降级为仅 RSA**。ECDSA P-256/P-384 挂起不实现，`crypto_verified` 对 ECDSA 恒 false（fail-closed），显式 `#skip` 缺口。里程碑序列据此裁剪：M6-1→M6-2→M6-4(RSA 分支)→M6-5→M6-6（仅 RSA 样本）；M6-3（ECDSA 原语）与 v2/v3/v3.1 的 ECDSA 分支移除出本轮范围，留作独立后续裁决点。
+> **裁决结论（2026-11-18，方案 B）**：立项，但**降级为仅 RSA**。ECDSA P-256/P-384 挂起不实现，`crypto_verified` 对 ECDSA 恒 false（fail-closed），显式 `#skip` 缺口。里程碑序列据此裁剪：M6-1→M6-2→M6-4(RSA 分支)→M6-5→M6-6（仅 RSA 样本）；M6-3（ECDSA 原语）与 v2/v3/v3.1 的 ECDSA 分支移除出本轮范围，留作独立后续裁决点。**（后续进展：ECDSA 已由下方 W6-后续 里程碑 a/b/c 全量实现并接入调度链，2026-11-18。）**
 
 **目标**：在**不改变任何既有语义**的前提下，新增真验签通道：v1 CMS/PKCS#7 SignedData 签名值验证 + v2/v3/v3.1 signer 签名值验证（RSA PKCS#1 v1.5 与 ECDSA P-256/P-384）。
 
@@ -232,7 +232,7 @@ pub fn Apk::verify_signatures(Self) -> Array[SignatureVerification] raise ApkErr
 - **M6-RSA-b（原 M6-5）**：v1 接入：CMS SignedData 的 signerInfo 签名值验证（复用 W3 DER 读取器），并入 `verify_signatures` 的 v1 分支。已知向量测试。
 - **M6-6 与 `apksigner verify` 本地 oracle 差分（真/假样本各 ≥3；2026-11-18 已实跑 6/6 AGREE）**。
 
-**风险与止损**：大数/曲线实现是安全敏感代码，侧信道不在本库威胁模型内（离线分析工具），但**正确性必须向量全覆盖**；任一里程碑向量不过即停，不得带病推进。**已按方案 B 降级为仅 RSA**（2026-11-18 裁决）：ECDSA 曲线运算（M6-3）不实现，`crypto_verified` 对 ECDSA 恒 false，风险压缩至大数模幂 + RSA 原语一处。
+**风险与止损**：大数/曲线实现是安全敏感代码，侧信道不在本库威胁模型内（离线分析工具），但**正确性必须向量全覆盖**；任一里程碑向量不过即停，不得带病推进。W6 主轮按方案 B 降级为仅 RSA（2026-11-18 裁决），风险压缩至大数模幂 + RSA 原语一处；ECDSA 曲线运算与 v2/v3/v1 接入随后经 W6-后续 里程碑 a/b/c 落地，并以 RFC 6979 向量 + 端到端调度链测试覆盖。
 
 **验收**：T-W6-1 各算法 NIST/已知向量 100%；T-W6-2 apksigner 判 Verifies 的受控样本 `crypto_verified=true`；T-W6-3 篡改样本 false；T-W6-4 旧 API 行为逐字节回归零漂移；T-W6-5 不支持算法 fail-closed。
 
@@ -254,9 +254,9 @@ pub fn Apk::verify_signatures(Self) -> Array[SignatureVerification] raise ApkErr
 - 现有「已知向量」是与 `cryptography` 等二手实现交叉验证的结果，**不是 FIPS/NIST 权威向量**，不得表述为权威向量通过。
 - `--self-test` 只是库内自洽（库对比自设期望值），不是外部裁判；T-W6-2/T-W6-3 的独立性依据是 W6-hardening-3 的 6 件 apksigner 实跑样本（3 真 + 3 篡改），样本规模有限，不构成全面保证。
 
-#### W6-后续：ECDSA P-256/P-384 真验签（2026-11-18 里程碑 a 交付，b/c 留空）
+#### W6-后续：ECDSA P-256/P-384 真验签（2026-11-18 里程碑 a/b/c 全部交付）
 
-> **现状**：W6 已裁决降级为"仅 RSA"（方案 B），ECDSA 曲线运算（原 M6-3）不实现，`crypto_verified` 对 ECDSA 恒 false。本后续为解决该 `#skip` 的路径，分三档里程碑落地。
+> **现状**：W6 原裁决降级为"仅 RSA"（方案 B），ECDSA 曲线运算（原 M6-3）不实现。本后续为解决该 `#skip` 的路径，分三档里程碑落地；截至 2026-11-18，**里程碑 a/b/c 全部实现并接入调度链**，`crypto_verified` 对真 ECDSA 签名可置 true（fail-closed 语义仅在签名非法/曲线不匹配/SPKI 解析失败时保持）。
 
 **里程碑 a ✓（2026-11-18 交付）：曲线原语 + NIST 向量**
 
@@ -264,11 +264,17 @@ pub fn Apk::verify_signatures(Self) -> Array[SignatureVerification] raise ApkErr
 - **API 影响（纯加法）**：`pub(all) enum EcCurve { P256 P384 Unknown }` + `pub fn ecdsa_verify_raw(EcCurve, String, String, String, String, String) -> Bool`。
 - **向量来源**：RFC 6979 A.2.5（P-256，"sample" 消息的 SHA-256）与 A.2.6（P-384，"sample" 消息的 SHA-384），公钥 U、签名 (r,s) 均为标准值；SHA-256/SHA-384 消息哈希经 .NET 独立核算一致。
 - **门禁现实满足**：`ecdsa_verify_raw` 本身即合法的公开入口，内部曲线原语通过它被公开引用，通过 `moon check --deny-warn` 的 `unused_value`（与 M6-RSA 的 `verify_signatures` 公开入口模式一致）。
-- **性能**：Jacobian 坐标实现（1 次模逆/标量点乘），211 总测试 ~80 秒（含全量既有测试 + ECDSA 13 个验证），wasm debug 目标。
+- **性能**：Jacobian 坐标实现（1 次模逆/标量点乘），wasm debug 目标。
 
-**里程碑 b（待日后续，不列入本轮）**：ECDSA 验签接入 v2/v3/v3.1（复用 `collect_signature_records`/`verify_v2_crypto` 的 signer 数据结构，新增 ECDSA 签名算法 ID 分支，`crypto_verified=true`）。需真 ECDSA 签名的受控 APK 样本（apksigner 自产出或 W6-hardening-3 fixture 体系扩展）。
+**里程碑 b ✓（2026-11-18 交付）：ECDSA 接入 v2/v3/v3.1**
 
-**里程碑 c（待日后续，不列入本轮）**：v1 CMS ECDSA（OID 1.2.840.10045.4.3.2/3.3.1，复用 v1 CMS SignedData 解析链路）。
+`ecdsa.mbt` 新增 `ec_public_key_from_spki`（解析 EC SPKI，P-256/P-384）与 `ec_sig_from_der`（解析 DER `SEQUENCE{INTEGER r, INTEGER s}`）；`verify.mbt` `verify_v2_signers` 在 RSA 解析失败后尝试 EC SPKI，支持 `0x0201`(SHA256withECDSA) / `0x0202`(SHA512withECDSA)，两者皆失败才 fail-closed。`ecdsa_wbtest.mbt` 覆盖 SPKI/DER 正反用例 + RFC 6979 A.2.5 向量走 v2 调度链端到端（`crypto_verified=true`）+ 非 EC SPKI / 截断签名 / 篡改 r fail-closed（git `be5aad9`，`.mbti` 零 diff）。
+
+**里程碑 c ✓（2026-11-18 交付）：ECDSA 接入 v1 CMS SignedData**
+
+`cms.mbt` `cms_sig_alg_name` 识别 ecdsa-with-SHA256/SHA512（含 4.1 通配与 1.3.132.0.35 别名）置 `sig_alg=ECDSA`；`verify_v1_signer_info` 在 RSA SPKI 失败后尝试 EC SPKI，新增 ECDSA 分支（signedAttrs SET OF / .SF 内容），新增私有 `cms_ecdsa_verify`。`cms_wbtest.mbt` 覆盖 RFC 6979 A.2.5 向量手工装配 PKCS#7 走 v1 调度链（`crypto_verified=true`）+ DSA SPKI / RSA 密钥配 ECDSA / 截断 DER / 曲线不匹配 fail-closed（git `d26d1ff`，`.mbti` 零 diff）。
+
+**修复（2026-11-18，git `1a7b732`）**：新增 `ec_hash_to_e`，按曲线阶 n 位长截取哈希最左侧 n_bits 位，修复 SHA-512 摘要（如 P-384+`0x0202`）直接取模导致的验签假阴性。
 
 ### W7 真实 .so ABI 黄金差分——许可安全路径（P1/M）
 
@@ -329,9 +335,9 @@ M1（第 2–3 日）    W1 批量完整性报告                  ← 首个能
 M2（第 4–6 日）    W2 内存防线 + W4 v1 SHA-512        ← 安全与摘要半环闭合
 M3（第 7–9 日）    W3 证书解析 + W7 黄金差分双轨       ← 合规初筛能力成型
 M4（当前）         W5 verity + W8 Dart 符号定位       ← 识别层纵深
-M6（W6 公钥验签·仅 RSA，2026-11-18）  ← M6-RSA-a ✓ + M6-RSA-b ✓ + M6-RSA-fix ✓（算法 ID/PSS/v3 布局修正）+ M6-6 ✓（oracle 实跑 6/6 AGREE）+ W6-hardening-1..5 ✓；ECDSA 分支挂起 #skip
+M6（W6 公钥验签·仅 RSA，2026-11-18）  ← M6-RSA-a ✓ + M6-RSA-b ✓ + M6-RSA-fix ✓（算法 ID/PSS/v3 布局修正）+ M6-6 ✓（oracle 实跑 6/6 AGREE）+ W6-hardening-1..5 ✓；ECDSA 分支后续见 W6-后续
 W5-后续（2026-11-18）  ← fs-verity Merkle 根重算 + v2/v3 verity 摘要比对 ✓（`Apk::verity_tree_check` + `VerityTreeCheck`，AOSP 布局核实后落地，口径修正见 §3.W5-后续）
-W6-后续 里程碑 a（2026-11-18）  ← ECDSA P-256/P-384 曲线原语 + RFC 6979 向量 ✓（`ecdsa_verify_raw` + `EcCurve`，Jacobian 坐标 pure-MoonBit，里程碑 b/c 留空）
+W6-后续 里程碑 a/b/c（2026-11-18）  ← ECDSA P-256/P-384 曲线原语 + RFC 6979 向量 ✓（`ecdsa_verify_raw` + `EcCurve`，Jacobian 坐标 pure-MoonBit）＋ 接入 v2/v3/v3.1（b ✓）与 v1 CMS（c ✓）＋ 超长摘要截断修复 ✓；当前 `moon test` 221/221 全绿
 ```
 
 排序判据：先零风险文档、再安全缺口、再高价值低成本能力、最后安全敏感大工程。每个工作包独立提交（一个包 ≥1 条实质 commit），独立过五门禁，互不阻塞。

@@ -1,8 +1,8 @@
 # apk · APK 容器解析
 
 > 独立发布单元 ｜ L1 逆向输入 ｜ `preferred_target = wasm` ｜ Apache-2.0
-> 状态：`moon test` **211/211** 通过（2026-11-18 本机实测，另有 8 个 `#skip` 用例不计入）；本文件是本仓库**唯一**说明文档。
-> 最新能力：W5-后续 ✓（fs-verity Merkle 根重算，`Apk::verity_tree_check`）；W6-后续里程碑 a ✓（ECDSA P-256/P-384 曲线原语，`ecdsa_verify_raw`）；API 影响为纯加法（新增 1 enum + 1 struct + 2 pub fn）。
+> 状态：`moon test` **221/221** 通过（2026-11-18 本机实测，另有 7 个 `#skip` 用例不计入）；本文件是本仓库**主**说明文档，其余文档见 §7 文档索引。
+> 最新能力：W5-后续 ✓（fs-verity Merkle 根重算，`Apk::verity_tree_check`）；W6-后续里程碑 a/b/c ✓（ECDSA P-256/P-384 曲线原语 `ecdsa_verify_raw` + 接入 v2/v3/v3.1 与 v1 CMS）；API 影响为纯加法（新增 1 enum + 1 struct + 2 pub fn）。
 > 公开 API 以 `pkg.generated.mbti` 为准（由 `moon info` 生成，禁手工编辑）；加法性变更须登记簿记 + 快照审阅 + 快照门禁。
 
 ## 1. 定位与边界
@@ -12,8 +12,8 @@
 **能力**
 
 - 中央目录 / local 头索引与条目提取，支持多 dex（`classes*.dex`），拒绝 ZIP64
-- aapt2 裸对齐填充兼容（`zipmin.mbt`）；v1 / v2 / v3 / v3.1 签名块结构解析与摘要校验
-- **RSA 公钥验签**（W6，2026-11-18 加法子能力）：`Apk::verify_signatures()` 对 v1 CMS signerInfo 与 v2/v3/v3.1 的 RSA PKCS#1 v1.5 / RSA-PSS 签名值做真实公钥验签；apksigner oracle 差分 harness 见 `tests/apksigner_oracle_diff.py`（SDK 缺失时显式 SKIPPED）
+- aapt2 裸对齐填充兼容（`apk.mbt`）；v1 / v2 / v3 / v3.1 签名块结构解析与摘要校验
+- **公钥验签**（W6，2026-11-18 加法子能力）：`Apk::verify_signatures()` 对 v1 CMS signerInfo 与 v2/v3/v3.1 的 RSA PKCS#1 v1.5 / RSA-PSS 与 ECDSA P-256/P-384 签名值做真实公钥验签；apksigner oracle 差分 harness 见 `tests/apksigner_oracle_diff.py`（SDK 缺失时显式 SKIPPED）
 - `AndroidManifest.xml`、`resources.arsc`、`classes.dex` 等条目的定位与字节提取
 - ELF 只读侦察：`DT_NEEDED`、`Java_*` JNI 导出、Dart AOT 标记（2026-11-10 加法性子能力）
 - `apk-cli list` / `extract`（`--all` / `--entry` / `--json`）
@@ -32,7 +32,7 @@
 - 容器层只产出 `Bytes` 与索引值（ADR-0003 主决策）；下游靠 Wire `Blob` 承接。
 - 2026-11-16 裁决：`resources.arsc` 完整展开的**语义归属判给外部 `axml` 库**；本库 `resource_table_full` / `parse_resources_arsc` 自本日起**冻结不再增强**（API 冻结语义禁止删除，保留兼容）；跨库展开一致性差分由外部组合层承担，不在本仓库范围（详见 `docs/2026-11-16-container-trust-dev-plan.md` W9）。
 - 2026-11-10 ELF 只读侦察以纯插入方式落地，不改原决策、`ApkError` 复用 `BadElf`。
-- 2026-11-18 裁决（W6）：公钥验签立项但降级为**仅 RSA**（方案 B）。`verify_signatures()` 新增承载真验签结论；ECDSA P-256/P-384 挂起 `#skip`，对 ECDSA 签名 `crypto_verified` 恒 false（fail-closed）；`signature_verified` 恒 false 语义永不改变（详见 `docs/2026-11-16-container-trust-dev-plan.md` W6）。
+- 2026-11-18 裁决（W6）：公钥验签立项但首轮降级为**仅 RSA**（方案 B）。`verify_signatures()` 新增承载真验签结论；ECDSA P-256/P-384 随后经 W6-后续 里程碑 a/b/c 全量落地并接入 v2/v3/v3.1 与 v1 CMS（真 ECDSA 签名 `crypto_verified` 可置 true，非法签名/曲线不匹配/SPKI 解析失败仍 fail-closed）；`signature_verified` 恒 false 语义永不改变（详见 `docs/2026-11-16-container-trust-dev-plan.md` W6）。
 - 唯一第三方依赖 `bobzhang/zip@0.1.2`（仅 deflate）；aapt2 在 1,028 个 local 头中 403 个写 1~3 B 裸填充，已规避并转永久回归。
 
 ## 3. 公开 API 索引（自动抽取 `pkg.generated.mbti` 的 `pub` 声明行；完整字段见快照）
@@ -42,12 +42,16 @@ pub fn ecdsa_verify_raw(EcCurve, String, String, String, String, String) -> Bool
 
 pub fn parse_certificate(Bytes) -> CertificateInfo raise ApkError
 pub fn parse_resources_arsc(Bytes) -> ResTable raise ApkError
+pub suberror ApkError { ... }           // 10 变体；见快照
+pub fn ApkError::to_repr(Self) -> @debug.Repr
 pub(all) enum Abi {
 pub(all) struct Apk {
 pub fn Apk::certificate_infos(Self) -> Array[CertificateInfo] raise ApkError
 pub fn Apk::dex_files(Self) -> Array[DexEntry] raise ApkError
 pub fn Apk::entries(Self) -> Array[ZipEntryRef]
 pub fn Apk::entry(Self, String) -> Bytes raise ApkError
+pub fn Apk::entry_capped(Self, String, Int64) -> Bytes? raise ApkError
+pub fn Apk::integrity_checks(Self) -> Array[IntegrityCheck]
 pub fn Apk::manifest(Self) -> ManifestRef raise ApkError
 pub fn Apk::native_libs(Self, Abi?) -> Array[NativeLib] raise ApkError
 pub fn Apk::open(Bytes) -> Self raise ApkError
@@ -56,15 +60,20 @@ pub fn Apk::resource_table_full(Self) -> ResTable? raise ApkError
 pub fn Apk::signature_checks(Self) -> Array[SignatureCheck] raise ApkError
 pub fn Apk::signatures(Self) -> Array[SignatureInfo] raise ApkError
 pub fn Apk::verify_signatures(Self) -> Array[SignatureVerification] raise ApkError
+pub fn Apk::verity(Self) -> VerityInfo? raise ApkError
 pub fn Apk::verity_tree_check(Self) -> VerityTreeCheck? raise ApkError
+pub impl ContainerIndex for Apk
 pub(all) struct CertificateInfo {
+pub(all) struct DartSnapshotRef {
 pub(all) struct DexEntry {
 pub(all) enum EcCurve {
 pub(all) enum ElfClass {
 pub(all) struct ElfInfo {
 pub(all) struct ElfSymbol {
+pub(all) struct IntegrityCheck {
 pub(all) struct ManifestRef {
 pub(all) struct NativeLib {
+pub fn NativeLib::dart_snapshot_refs(Self) -> Array[DartSnapshotRef] raise ApkError
 pub fn NativeLib::elf_abi(Self) -> Abi raise ApkError
 pub fn NativeLib::elf_info(Self) -> ElfInfo raise ApkError
 pub fn NativeLib::jni_exports(Self) -> Array[String] raise ApkError
@@ -91,7 +100,12 @@ pub(all) struct SignatureCheck {
 pub(all) struct SignatureInfo {
 pub(all) enum SignatureScheme {
 pub(all) struct SignatureVerification {
+pub(all) struct VerityInfo {
+pub fn VerityInfo::to_repr(Self) -> @debug.Repr
+pub(all) struct VerityTreeCheck {
 pub(all) struct ZipEntryRef {
+pub type EntryName = String
+pub trait ContainerIndex { ... }
 ```
 
 ## 4. 依赖、平台与许可
@@ -107,8 +121,24 @@ pub(all) struct ZipEntryRef {
 ## 6. 风险与未决
 
 - `resources.arsc` 完整展开的**语义归属**已裁决判给外部 `axml` 库（见 §2 决策行）；本库 `resource_table_full` / `parse_resources_arsc` 冻结不再增强，无「未裁决去重」遗留。
-- `verify_signatures()`（W6，公钥验签）已于 2026-11-18 裁决立项，采用**仅 RSA 降级**（方案 B）：M6-RSA-a/b 已落地 v1 CMS 与 v2/v3/v3.1 的 RSA（PKCS#1 v1.5 + PSS）真验签；M6-6 oracle 差分 harness（`tests/apksigner_oracle_diff.py`）已于 2026-11-18 实跑 build-tools r34：3 真 RSA + 3 篡改 **6/6 AGREE**（见 CHANGELOG W6-hardening-3）。oracle 属外部依赖（需 Android SDK build-tools），本地缺失时按纪律显式 SKIPPED（exit 78）、不计入通过。
-  - **W6-后续 里程碑 a（2026-11-18）**：ECDSA P-256/P-384 曲线原语已以纯 MoonBit Jacobian 坐标自研落地，公开入口 `ecdsa_verify_raw` 通过 RFC 6979 A.2.5/A.2.6 标准向量全绿（11 个黑盒+白盒测试）。里程碑 b（接 v2/v3/v3.1）与 c（v1 CMS）留空，`crypto_verified` 对 ECDSA 依旧恒 false（fail-closed），`signature_verified` 恒 false 语义不变。
+- `verify_signatures()`（W6，公钥验签）已于 2026-11-18 裁决立项，首轮采用**仅 RSA 降级**（方案 B）：M6-RSA-a/b 已落地 v1 CMS 与 v2/v3/v3.1 的 RSA（PKCS#1 v1.5 + PSS）真验签；M6-6 oracle 差分 harness（`tests/apksigner_oracle_diff.py`）已于 2026-11-18 实跑 build-tools r34：3 真 RSA + 3 篡改 **6/6 AGREE**（见 CHANGELOG W6-hardening-3）。oracle 属外部依赖（需 Android SDK build-tools），本地缺失时按纪律显式 SKIPPED（exit 78）、不计入通过。
+  - **W6-后续 里程碑 a/b/c（2026-11-18）**：ECDSA P-256/P-384 曲线原语已以纯 MoonBit Jacobian 坐标自研落地，公开入口 `ecdsa_verify_raw` 通过 RFC 6979 A.2.5/A.2.6 标准向量全绿；里程碑 b（接入 v2/v3/v3.1）与 c（接入 v1 CMS SignedData）随后合入，真 ECDSA 签名走调度链 `crypto_verified` 可置 true；非法签名/非 EC SPKI/曲线不匹配/截断 DER 一律 fail-closed。`signature_verified` 恒 false 语义不变。
 - 第三方 APK 许可不明，禁止入库；受控自建样本与哈希登记见本仓库 `tests/fixtures/`。
 - `zip@0.1.2` 单人维护、star=0 的 bus factor 风险已登记，不阻断使用。
+
+## 7. 文档索引
+
+本仓库文档自包含，不依赖工作区其他目录：
+
+| 文档 | 用途 |
+|---|---|
+| [`README.md`](README.md) | 本文件：定位/边界、关键决策、公开 API、CLI、风险（主说明） |
+| [`README.mbt.md`](README.mbt.md) | 包级 readme（`moon.mod` 引用），指向本文件 |
+| [`docs/2026-11-16-container-trust-dev-plan.md`](docs/2026-11-16-container-trust-dev-plan.md) | 工作包 W1–W9 开发计划、里程碑、DoD、风险登记 |
+| [`docs/2026-11-16-test-system-design.md`](docs/2026-11-16-test-system-design.md) | 测试系统设计（L0–L5 分层、断言 A1–A6、覆盖矩阵） |
+| [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | 每个工作包合入的簿记（日期/新增 pub/快照/测试增量） |
+| [`tests/ASSETS.md`](tests/ASSETS.md) | fixture 哈希登记与许可红线账本 |
+| [`docs/verify_verity_ref.py`](docs/verify_verity_ref.py) / [`docs/verify_verity_e2e.py`](docs/verify_verity_e2e.py) | fs-verity Merkle 树交叉校验脚本 |
+
+测试脚本与工具：`tests/cli_e2e.py`（L4）、`tests/apksigner_oracle_diff.py`（L3 oracle）、`tests/local_real_diff.py`（R）、`tools/parity-check.ps1`（L5 双目标）、`tools/error-bookkeeping.ps1`（L5 错误簿记）、`tools/mutation-sanity.ps1`（L5 变异自检）。
 

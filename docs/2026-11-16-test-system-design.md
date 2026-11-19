@@ -134,7 +134,7 @@ F = 申报核心功能，S = 预期使用场景，C = 安全约束。「现状�
 | F9 | 批量完整性报告 | — | P6 | — | unzip | ✅ | 已实现（W1，2026-11-17） | — |
 | F10 | 证书结构事实 | — | DER 截断 | — | apksigner | ✅ | **已实现（W3，M3）** | — |
 | F11 | verity 结构 | — | 位翻转 | — | — | — | **已实现（W5，M4）** | — |
-| F12 | 公钥验签（新通道） | — | 向量 | — | apksigner | — | **已实现（W6·仅 RSA，M6-RSA-a/b/fix + M6-6 + W6-hardening-1..5）** | ECDSA #skip；apksigner oracle 已实跑（2026-11-18，build-tools r34）：3 真 RSA + 3 篡改，6/6 AGREE |
+| F12 | 公钥验签（新通道） | — | 向量 | — | apksigner | — | **已实现（W6·RSA + ECDSA，M6-RSA-a/b/fix + M6-6 + W6-hardening-1..5 + W6-后续 里程碑 a/b/c）** | apksigner oracle 已实跑（2026-11-18，build-tools r34）：3 真 RSA + 3 篡改，6/6 AGREE |
 | S1 | 逆向摸底：list --json → extract --entry | — | — | ✅ | — | ✅ | 已覆盖（L4 cli_e2e.py 哈希对 zipfile 引用） | — |
 | S2 | 合规初筛：signatures/signature_checks 批量 | ✅ | 恒等式 | ✅ | apksigner | ✅ | API 已有 + L4 verify/certs 契约 | — |
 | S3 | 取证提取：extract --all + 安全拒绝 | ✅ | 边界值 | ✅ | — | ✅ | 已覆盖（L4 cli_e2e.py 落盘哈希 + 4 类恶意条目预检拒绝） | — |
@@ -220,4 +220,4 @@ python tests/local_real_diff.py …  # R（本地可选，哈希门禁）
 - [x] L4：S1/S2/S3 + 安全拒绝语料 + 退出码矩阵全绿；记录行/JSON 契约断言生效（收口轮 P1，2026-11-18，`tests/cli_e2e.py`：53/53 PASS；含 `verify --json` scheme 字段引用化修复 + `extract --all` 大小写/目录前缀冲突预检）
 - [x] L5：错误簿记 10/10；双目标 diff=0；变异自检 3/3 变红后复绿（收口轮 P2，2026-11-18，`tools/error-bookkeeping.ps1` / `tools/parity-check.ps1` / `tools/mutation-sanity.ps1` 全绿）
 - [x] R：哈希门禁拒绝错误样本演示一次；真实样本结论未进入通过计数（收口轮 P3，`tests/local_real_diff.py`：以未登记样本 `tests/fixtures/base.apk` 演示，`exit 78` 拒绝，消息含「未登记于 tests/ASSETS.md 白名单 → 拒绝」；因许可红线当前白名单为空，任何样本均被拒，真实第三方 .so 的差分结论从不进入 `moon test` 通过计数）
-- [x] 覆盖矩阵 §6.1 中所有「待建/缺口」项随 W1–W8 合入转为已覆盖或显式 SKIPPED（F12 已随 W6 落地（2026-11-18）：RSA 真验签 186/186 全绿，ECDSA `#skip`；apksigner oracle 已实跑 3 真 + 3 篡改 6/6 AGREE，M6-6 的 SKIPPED 已被覆盖）
+- [x] 覆盖矩阵 §6.1 中所有「待建/缺口」项随 W1–W8 合入转为已覆盖或显式 SKIPPED（F12 已随 W6 落地（2026-11-18）：RSA 真验签 186/186 全绿，ECDSA 随后由 W6-后续 里程碑 a/b/c 接入 v2/v3/v3.1 与 v1；apksigner oracle 已实跑 3 真 + 3 篡改 6/6 AGREE，M6-6 的 SKIPPED 已被覆盖）

@@ -17,11 +17,15 @@
 #        快照不受本仓库版本控制，二者均不在 diff 范围。）
 # （可选 moon clean：仅清理，continue-on-error，不参与判定）
 #
-# 本仓库锁定的工具链版本：
-#   moon    0.1.20261104
-#   moonc   v0.10.20+65efd5b93
-#   moonrun 0.1.20261104
-#   core    0.10.20+65efd5b93（以 ~/.moon/lib/core/moon.mod 为准）
+# 工具链版本策略（2026-11-18 修订）：
+#   官方分发只提供 latest。指定版本的产物路径
+#   https://cli.moonbitlang.com/binaries/<version>/moonbit-linux-x86_64.tar.gz
+#   对 0.1.20261103 / 20261104 / 20261116 / 20261117 实测均返回 HTTP 403，
+#   cli.moonbitlang.cn 镜像同样 403，仅 latest 可下载（200/206）。
+#   因此「安装指定版本 + 硬断言精确版本」在官方渠道上不可实现：安装必然回退到
+#   latest，断言必然随 latest 前进而失败。现改为：安装 latest，把实际版本写入构建
+#   日志与 step summary，并校验 core 版本与 moonc 构建号一致（安装完整性）；
+#   真正的正确性由下面五道门禁判定。
 #
 # 本仓库依赖策略（2026-11-09 修订，修正原「check/build 自动同步」的错误假设）：
 #   - moon.mod 钉死精确版本（bobzhang/zip@0.1.2），版本不会漂移；漂移风险来自
@@ -34,8 +38,8 @@
 #   - `moon fetch <author>/<name>@<version> --no-update` 在无索引的冷环境实测失败
 #     （os error 3，2026-11-09），不能用作冷启动引导，仅适用于已有索引的环境。
 #   - 不用 `moon build --frozen`：全新 checkout 没有本地依赖缓存，--frozen 会直接失败。
-#   - 版本安装：优先 `unix.sh <版本>` 钉死安装；若 CDN 拒绝版本化产物（2026-11-07 实测 403），
-#     回退安装 latest，并由下一步的版本断言**强制**校验——断言不过即失败，锁不会静默漂移。
+#   - 版本安装：官方 CDN 不提供可下载的版本化产物（2026-11-18 对多个版本实测 403），
+#     只安装 latest；版本号仅作记录，不作硬性等值断言（等值断言在 latest 前进时必然误报）。
 # ============================================================================
 name: ci
 
@@ -47,12 +51,6 @@ on:
 permissions:
   contents: read
 
-env:
-  MOON_VERSION_LOCKED: "0.1.20261104"
-  MOONC_VERSION_LOCKED: "v0.10.20+65efd5b93"
-  MOONRUN_VERSION_LOCKED: "0.1.20261104"
-  CORE_VERSION_LOCKED: "0.10.20+65efd5b93"
-
 jobs:
   five-gates:
     name: five-gates (apk)
@@ -63,43 +61,47 @@ jobs:
       - name: Checkout apk
         uses: actions/checkout@v5
 
-      - name: Install MoonBit toolchain (pinned ${{ env.MOON_VERSION_LOCKED }})
+      - name: Install MoonBit toolchain (latest)
         shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
           mkdir -p "$HOME/.moon/tmp"
           if ! curl -fsSL https://cli.moonbitlang.com/install/unix.sh -o "$HOME/.moon/tmp/install.sh"; then
             echo "::error::cannot download https://cli.moonbitlang.com/install/unix.sh"
             exit 1
           fi
-          if bash "$HOME/.moon/tmp/install.sh" "$MOON_VERSION_LOCKED"; then
-            echo "pinned install OK: moon $MOON_VERSION_LOCKED"
-          else
-            echo "::warning::pinned install of moon $MOON_VERSION_LOCKED failed (cli.moonbitlang.com versioned artifacts returned HTTP 403 when probed on 2026-11-07; only latest/nightly were reachable). Falling back to 'latest' - the next step asserts the locked versions and FAILS on any drift."
-            bash "$HOME/.moon/tmp/install.sh" || { echo "::error::fallback install failed"; exit 1; }
-          fi
+          bash "$HOME/.moon/tmp/install.sh"
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
-      - name: Assert locked toolchain versions (moon / moonc / moonrun / core)
+      - name: Report toolchain versions and verify install integrity
         shell: bash
         run: |
           set -euo pipefail
+          # 官方渠道只分发 latest（版本化产物路径实测 403，见文件头版本策略），
+          # 故不对构建号做等值断言；此处校验安装完整性：core 版本必须等于 moonc 构建号。
           out="$(moon version --all)"
           echo "$out"
-          fail=0
-          grep -qF "moon $MOON_VERSION_LOCKED" <<<"$out" || { echo "::error::moon drift: expected $MOON_VERSION_LOCKED"; fail=1; }
-          grep -qF "moonc $MOONC_VERSION_LOCKED" <<<"$out" || { echo "::error::moonc drift: expected $MOONC_VERSION_LOCKED"; fail=1; }
-          grep -qF "moonrun $MOONRUN_VERSION_LOCKED" <<<"$out" || { echo "::error::moonrun drift: expected $MOONRUN_VERSION_LOCKED"; fail=1; }
+          {
+            echo "### MoonBit toolchain"
+            echo '```'
+            echo "$out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
           core_mod="$HOME/.moon/lib/core/moon.mod"
-          if [[ -f "$core_mod" ]]; then
-            echo "--- $core_mod ---"
-            grep -E '^(name|version) *=' "$core_mod" || true
-            grep -qF "version = \"$CORE_VERSION_LOCKED\"" "$core_mod" || { echo "::error::moonbitlang/core drift: expected $CORE_VERSION_LOCKED"; fail=1; }
-          else
-            echo "::error::missing $core_mod (core not installed)"
-            fail=1
+          [[ -f "$core_mod" ]] || { echo "::error::missing $core_mod (core not installed)"; exit 1; }
+          core_ver="$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$core_mod")"
+          moonc_ver="$(sed -n 's/^moonc *v\?\([^ ]*\).*/\1/p' <<<"$out")"
+          echo "core  $core_ver"
+          echo "moonc $moonc_ver"
+          if [[ -z "$core_ver" || -z "$moonc_ver" ]]; then
+            echo "::error::cannot parse core/moonc versions (core='$core_ver', moonc='$moonc_ver')"
+            exit 1
           fi
-          exit $fail
+          if [[ "$core_ver" != "$moonc_ver" ]]; then
+            echo "::error::broken toolchain install: core ($core_ver) != moonc build ($moonc_ver). Re-run the install step."
+            exit 1
+          fi
 
       # ---- 冷启动引导 + 五道门禁：顺序执行，任一非 0 即失败 ----
       - name: "Bootstrap moon registry index (cold checkout)"
@@ -133,7 +135,7 @@ jobs:
           set -euo pipefail
           moon info
           if ! git diff --exit-code -- pkg.generated.mbti cmd/main/pkg.generated.mbti; then
-            echo "::error::Gate 5/5 failed: pkg.generated.mbti snapshot out of sync with sources. Run 'moon info' locally and commit the regenerated snapshot together with the API change (additive changes also require a regenerated snapshot and an API-change note in this repository's docs/API.md)."
+            echo "::error::Gate 5/5 failed: pkg.generated.mbti snapshot out of sync with sources. Run 'moon info' locally and commit the regenerated snapshot together with the API change (additive changes also require a regenerated snapshot and an API-change note in this repository's README.md §2 and docs/CHANGELOG.md)."
             exit 1
           fi
           echo "Gate 5/5 OK: snapshot in sync (pkg.generated.mbti + cmd/main/pkg.generated.mbti)"

@@ -111,7 +111,7 @@
 - W4 v1 SHA-512 —— 已完成（M2）
 - W3 证书解析 + W7 黄金差分 —— 已完成（M3）
 - W5 verity + W8 Dart 符号定位 —— 已完成（M4）
-- W6 公钥验签 —— 已完成（2026-11-18）：仅 RSA（方案 B）；M6-RSA-a / M6-RSA-b / M6-RSA-fix / M6-6 + W6-hardening-1..5 全部合入；ECDSA 挂起 `#skip`
+- W6 公钥验签 —— 已完成（2026-11-18）：RSA 部分按方案 B（仅 RSA 降级）合入 M6-RSA-a/b/fix + M6-6 + W6-hardening-1..5；ECDSA P-256/P-384 经 W6-后续 里程碑 a/b/c 全量实现并接入 v2/v3/v3.1 与 v1（见下方小节）
 
 ### 2026-11-18 — W6 立项裁决落款（原「M5 启动」；仅 RSA 降级，方案 B）
 
@@ -321,7 +321,7 @@
 | 快照 diff 结论 | **零 diff** |
 | P5 | 签名块位移不变性由黑盒 `#skip` 转为白盒落地：`apk_wbtest.mbt`「whitebox: P5 signing-block shift invariance」。第一性原理澄清 `content_digest` 非字面位移不变量（section1 `[0,sb)` 随块起始平移而变、EOCD 副本 CD 偏移改写为新块起点，故摘要必然改变）；诚实断言四点——平移后随动重算摘要不同、`verify_v2` 对随动重算样本 `digest_ok=true`、对旧布局陈旧摘要套用平移布局 `digest_ok=false`（fail-closed）、三种情形 `signature_verified` 恒 false。对应 `l1_property_test.mbt` 的 P5 黑盒 `#skip` 块随实现同步移除 |
 | R | `tests/local_real_diff.py` 哈希门禁演示一次：以未登记样本 `tests/fixtures/base.apk` 跑，`exit 78` 拒绝，消息含「未登记于 tests/ASSETS.md 白名单 → 拒绝」；因许可红线白名单当前为空，真实第三方 .so 差分结论从不进入 `moon test` 通过计数 |
-| P1–P6 复盘点 | P1 bare-padding / P2 entry-reorder / P3 unrelated-append / P4 idempotence（`l1_property_test.mbt`）、P5 shift-invariance（`apk_wbtest.mbt`）、P6 dual-channel（`integrity_test.mbt`）全部落地且绿；剩余 `#skip` 均为文档化合法缺口（ECDSA 真验签、真实第三方 .so/oracle 差分、W5 树重算、畸形样本），共 8 个实际 `#skip` 测试块 |
+| P1–P6 复盘点 | P1 bare-padding / P2 entry-reorder / P3 unrelated-append / P4 idempotence（`l1_property_test.mbt`）、P5 shift-invariance（`apk_wbtest.mbt`）、P6 dual-channel（`integrity_test.mbt`）全部落地且绿；剩余 `#skip` 均为文档化合法缺口（**本盘点时刻**：ECDSA 真验签、真实第三方 .so/oracle 差分、W5 树重算、畸形样本），共 8 个实际 `#skip` 测试块。**（后续：ECDSA 真验签与 W5 树重算已分别由 W6-后续 a/b/c 与 W5-后续 解除，`#skip` 相应移除/改注。）** |
 | 验证命令 | `moon test` → 187/187 全绿（较 P2 的 186 新增 1 个 P5 白盒用例）；`python tests/local_real_diff.py tests/fixtures/base.apk` → exit 78（哈希门禁拒绝未登记样本） |
 
 ### 门禁
@@ -365,15 +365,52 @@
 | 项 | 值 |
 |---|---|
 | 日期 | 2026-11-18 |
-| 工作包 | W6-后续 ECDSA 真验签·里程碑 a：secp256r1/secp384r1 曲线原语 + RFC 6979 向量（不接 v2/v3/v1，里程碑 b/c 留空） |
+| 工作包 | W6-后续 ECDSA 真验签·里程碑 a：secp256r1/secp384r1 曲线原语 + RFC 6979 向量（接入 v2/v3/v1 由里程碑 b/c 完成） |
 | 新增 pub 声明 | `pub(all) enum EcCurve { P256 P384 Unknown }` + `pub fn ecdsa_verify_raw(EcCurve, String, ...) -> Bool` |
 | 快照 diff 结论 | **纯加法**（mbti 新增 3 处纯增声明；改动文件仅 `ecdsa_test.mbt`、`ecdsa_wbtest.mbt` 为新增，`apk_test.mbt` 与 `verity_tree_wbtest.mbt` 为私有 helper 新增/修复） |
 | 实现 | `ecdsa.mbt`（433 行）：域参数（NIST FIPS 186-4 / SEC 2）、费马模逆、模加/减/乘、Jacobian 坐标点加/双倍/标量点乘（1 次模逆 / scalar mul）、ECDSA 验签原语（r,s 越界检查 + 公钥曲线验证 + v==r 判等） |
 | 向量 | 黑盒 `ecdsa_test.mbt` 6 用例：P-256/P-384 RFC 6979 A.2.5/A.2.6 真签名通过 + r 篡改 fail-closed + s 篡改 fail-closed + 未知曲线拒绝 + 畸形十六进制/空串不 panic + r=n 越界/坏公钥 fail-closed；白盒 `ecdsa_wbtest.mbt` 7 用例：域参数位长 + on-curve + 点乘 x·G==公钥（P-256/P-384）+ 1·G==G + 0·G==infinity + 模逆自反 + 真验签通过（P-256/P-384）+ r/s 篡改 + 边界 fail-closed |
-| 门禁聚合 | `ecdsa_verify_raw` 本身即合法公开入口，承载内部曲线原语引用链，通过 `moon check --deny-warn` unused_value 门禁（无需接 v2/v3/v1） |
-| 性能 | Jacobian 坐标 + 费马模逆，211 总测试 ~80 秒（wasm debug） |
-| 里程碑 b/c | 留空，不列入本轮；`crypto_verified` 对 ECDSA 依旧恒 false，`verify_signatures` 不接 ECDSA 分支 |
+| 门禁聚合 | `ecdsa_verify_raw` 本身即合法公开入口，承载内部曲线原语引用链，通过 `moon check --deny-warn` unused_value 门禁（随后由里程碑 b/c 接入 v2/v3/v1） |
+| 性能 | Jacobian 坐标 + 费马模逆 |
+| 里程碑 b/c | 见下方两节（已实现并接入调度链） |
 
 ### 门禁
 
-`moon check --deny-warn` / `moon build` / `moon test`（211/211 全绿，+13 用例）/ `moon fmt --check` / `moon info` + mbti **纯加法 diff**（+20 行），全绿。
+`moon check --deny-warn` / `moon build` / `moon test` / `moon fmt --check` / `moon info` + mbti **纯加法 diff**（+20 行），全绿。
+
+### 2026-11-18 — W6-后续 里程碑 b：ECDSA 接入 v2/v3/v3.1
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | W6-后续 ECDSA 真验签·里程碑 b：P-256/P-384 接入 v2/v3/v3.1 签名方案 |
+| 新增 pub 声明 | **无**（复用既有 `ecdsa_verify_raw` 与内部原语；`.mbti` 零 diff） |
+| 实现 | `ecdsa.mbt`（新增 `ec_public_key_from_spki` 解析 EC SPKI、`ec_sig_from_der` 解析 DER `SEQUENCE{INTEGER r, INTEGER s}`）；`verify.mbt` `verify_v2_signers` 在 RSA 解析失败后尝试 EC SPKI，支持 `0x0201`(SHA256withECDSA) / `0x0202`(SHA512withECDSA)，两者皆失败才 fail-closed |
+| 向量 | `ecdsa_wbtest.mbt`：SPKI/DER 解析正反用例 + RFC 6979 A.2.5 向量走 v2 调度链端到端（`crypto_verified=true`）+ 非 EC SPKI/截断签名/篡改 r fail-closed |
+| 门禁 | `moon check --deny-warn` / `moon fmt --check` 通过；`.mbti` 无漂移（git `be5aad9`） |
+
+### 2026-11-18 — W6-后续 里程碑 c：ECDSA 接入 v1 CMS SignedData
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | W6-后续 ECDSA 真验签·里程碑 c：P-256/P-384 接入 v1 CMS SignedData signerInfo |
+| 新增 pub 声明 | **无**（`.mbti` 零 diff） |
+| 实现 | `cms.mbt` `cms_sig_alg_name` 识别 ecdsa-with-SHA256/SHA512（含 4.1 通配与 1.3.132.0.35 别名）置 `sig_alg=ECDSA`；`verify_v1_signer_info` 在 RSA SPKI 失败后尝试 EC SPKI，新增 ECDSA 分支（signedAttrs SET OF / .SF 内容），新增私有 `cms_ecdsa_verify` |
+| 向量 | `cms_wbtest.mbt`：RFC 6979 A.2.5 向量手工装配 PKCS#7 走 v1 调度链（`crypto_verified=true`）+ DSA SPKI / RSA 密钥配 ECDSA / 截断 DER / 曲线不匹配 fail-closed |
+| 门禁 | `moon check --deny-warn` / `moon fmt --check` 通过；`.mbti` 无漂移（git `d26d1ff`） |
+
+### 2026-11-18 — W6-后续：修复 ECDSA 超长摘要截断口径
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-11-18 |
+| 工作包 | W6-后续 ECDSA 修复：按曲线阶 n 位长截取哈希最左侧 n_bits 位（`ec_hash_to_e`） |
+| 新增 pub 声明 | **无**（`.mbti` 零 diff） |
+| 实现 | `ecdsa.mbt` 新增 `ec_hash_to_e`；`verify.mbt`/`cms.mbt` ECDSA 验签改用之，修复 SHA-512 摘要（如 P-384+`0x0202`）直接取模导致的验签假阴性 |
+| 向量 | `ecdsa_wbtest.mbt` 覆盖 P-256/P-384 截断、前导零字节、短摘要不截断（git `1a7b732`） |
+
+### 当前状态
+
+`moon test` 实测 **221/221** 全绿（2026-11-18 本机）；`.mbti` 无漂移。
+

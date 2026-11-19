@@ -1,11 +1,15 @@
 # Reference: https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/customize-the-agent-environment
 #
-# 工具链版本锁定说明：
-#   1) 安装 MoonBit 由「无版本 latest」改为「钉死 0.1.20261104 + 版本断言」；
-#   2) 删除无版本的 `moon update`（`moon update --help` 实测只有 --target-dir/-q/-v/--trace/--dry-run，
-#      没有任何锁定版本的参数，不满足锁定版本要求）；
-#      依赖改为按 moon.mod 中钉死的版本声明（例 bobzhang/zip@0.1.2）由 build 自动同步获取；
-#   3) 真正的四道门禁（check --deny-warn → build → test → fmt --check）在同目录 ci.yml。
+# 工具链版本说明：
+#   1) 官方 CDN 只分发 latest：指定版本的产物路径对多个版本实测均返回 HTTP 403
+#      （2026-11-18，cli.moonbitlang.com 与 .cn 镜像一致），故不再安装指定版本，
+#      也不再对精确版本号做硬断言（latest 前进时等值断言必然误报）；
+#   2) 依赖获取需一次 `moon update` 冷启动引导 registry 索引（2026-11-09 实测全新
+#      runner 上 `moon check` 不会自动同步依赖，会报 "module was not found in the
+#      registry"）；`moon update` 只同步 registry 元数据、不改写 moon.mod 钉死的
+#      版本声明（例 bobzhang/zip@0.1.2），故仍满足版本可复现要求；
+#   3) 真正的五道门禁（check --deny-warn → build → test → fmt --check → moon info 快照 diff）
+#      在同目录 ci.yml。
 name: "Copilot Setup Steps"
 
 # Automatically run the setup steps when they are changed to allow for easy validation, and
@@ -34,33 +38,44 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Set up MoonBit (pinned 0.1.20261104)
+      - name: Set up MoonBit (latest)
         shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
           mkdir -p "$HOME/.moon/tmp"
           if ! curl -fsSL https://cli.moonbitlang.com/install/unix.sh -o "$HOME/.moon/tmp/install.sh"; then
             echo "::error::cannot download https://cli.moonbitlang.com/install/unix.sh"
             exit 1
           fi
-          if bash "$HOME/.moon/tmp/install.sh" "0.1.20261104"; then
-            echo "pinned install OK: moon 0.1.20261104"
-          else
-            echo "::warning::pinned install failed (versioned artifacts HTTP 403 on 2026-11-07 probe); falling back to latest + hard version assertion below"
-            bash "$HOME/.moon/tmp/install.sh" || { echo "::error::fallback install failed"; exit 1; }
-          fi
+          bash "$HOME/.moon/tmp/install.sh"
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
-      - name: Assert locked toolchain versions
+      - name: Report toolchain versions and verify install integrity
         shell: bash
         run: |
           set -euo pipefail
           out="$(moon version --all)"
           echo "$out"
-          grep -qF "moon 0.1.20261104" <<<"$out"
-          grep -qF "moonc v0.10.20+65efd5b93" <<<"$out"
-          grep -qF "moonrun 0.1.20261104" <<<"$out"
+          core_mod="$HOME/.moon/lib/core/moon.mod"
+          [[ -f "$core_mod" ]] || { echo "::error::missing $core_mod (core not installed)"; exit 1; }
+          core_ver="$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$core_mod")"
+          moonc_ver="$(sed -n 's/^moonc *v\?\([^ ]*\).*/\1/p' <<<"$out")"
+          if [[ -z "$core_ver" || -z "$moonc_ver" ]]; then
+            echo "::error::cannot parse core/moonc versions (core='$core_ver', moonc='$moonc_ver')"
+            exit 1
+          fi
+          if [[ "$core_ver" != "$moonc_ver" ]]; then
+            echo "::error::broken toolchain install: core ($core_ver) != moonc build ($moonc_ver)."
+            exit 1
+          fi
 
-      # 已删除：`moon update`（无版本、不可复现）。
-      # 依赖获取：直接使用 moon.mod 中已钉死的版本声明，由 moon check/build 自动同步；
-      # 如确需预取，用 `moon fetch <author>/<name>@<version> --no-update`。
+      # 依赖获取：全新 runner 无 ~/.moon/registry 索引，`moon check` 不会自动引导
+      # （会报 "module was not found in the registry"，2026-11-09 冷启动实测）。
+      # 因此需一次 `moon update` 引导索引与 symbols；依赖版本仍由 moon.mod 钉死的
+      # 版本声明（例 bobzhang/zip@0.1.2）解析，`moon update` 只同步 registry 元数据、
+      # 不改写 moon.mod 声明。真正的门禁在同目录 ci.yml。
+      - name: Bootstrap moon registry index (cold checkout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          moon update

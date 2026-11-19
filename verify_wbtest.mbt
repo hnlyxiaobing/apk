@@ -9,7 +9,11 @@
 /// 算法 ID 遵循 Android APK Signature Scheme v2/v3 口径：
 ///   0x0101 = RSA-PSS + SHA-256     0x0102 = RSA-PSS + SHA-512
 ///   0x0103 = RSA-PKCS#1 v1.5+SHA-256  0x0104 = RSA-PKCS#1 v1.5+SHA-512
-///   0x0201 = ECDSA + SHA-256（本库 fail-closed）
+///   0x0201 = ECDSA + SHA-256（真验签，经 W6-后续 里程碑 a/b/c 落地）
+///   0x0202 = ECDSA + SHA-512
+/// 本文件 `fixture_apk_ecdsa()` 使用 RSA 证书 + ECDSA 算法 ID（密钥与签名算法不匹配），
+/// 故 ECDSA 分支 fail-closed——它是「证书与算法不匹配」的负向用例，不是 ECDSA 未实现。
+/// ECDSA 真验签的正向/负向用例见 `ecdsa_wbtest.mbt`（v2/v3/v3.1）与 `cms_wbtest.mbt`（v1）。
 /// 十六进制辅助（`bytes_from_hex`/`hex_val`）复用 `rsa_wbtest.mbt`。
 
 ///|
@@ -180,28 +184,25 @@ test "T-W6-RSA-v31: RSA v3.1 signature verifies" {
 }
 
 ///|
-test "T-W6-RSA-ecdsa: ECDSA algorithm id fails closed" {
+test "T-W6-RSA-ecdsa: RSA 证书 + ECDSA 算法 ID 不匹配 → fail-closed" {
   let apk = Apk::open(fixture_apk_ecdsa())
   let checks = apk.verify_signatures()
   assert_eq(checks.length(), 1)
   let v = checks[0]
   assert_true(v.structure_ok, msg="structure parses")
-  assert_true(!v.crypto_verified, msg="ECDSA branch is fail-closed")
+  assert_true(
+    !v.crypto_verified,
+    msg="证书与算法不匹配必须 fail-closed",
+  )
   assert_eq(v.algo, "unsupported", msg="algo reports unsupported")
 }
 
 ///|
-/// ECDSA P-256/P-384 真验签已按 W6 裁决 `#skip` 立项延后（仅 RSA 降级）。
-/// 该测试固化「延后」决定：一旦实现 ECDSA，应移除 `#skip` 并改为真值断言。
-#skip
-test "T-W6-ECDSA-deferred: ECDSA verification is explicitly skipped (W6 RSA-only decision)" {
-  let apk = Apk::open(fixture_apk_ecdsa())
-  let checks = apk.verify_signatures()
-  assert_true(
-    checks[0].crypto_verified,
-    msg="would require real ECDSA verification",
-  )
-}
+/// 说明：ECDSA 真验签已由 W6-后续 里程碑 b/c 落地，覆盖 v2/v3/v3.1（`ecdsa_wbtest.mbt`
+/// `T-W6-EC-b-v2`）与 v1 CMS（`cms_wbtest.mbt` `T-W6-EC-c`）。原 `#skip`
+/// `T-W6-ECDSA-deferred` 占位用例已删除：其前提（`fixture_apk_ecdsa()` 期望
+/// `crypto_verified=true`）本就错误——该样本为 RSA 证书 + ECDSA 算法 ID 的不匹配
+/// 负向用例，即便 ECDSA 已实现也恒 fail-closed；正向真验签由上述真实 EC 样本覆盖。
 
 ///|
 test "T-W6-RSA-v1: valid JAR signature verifies via CMS signerInfo" {
