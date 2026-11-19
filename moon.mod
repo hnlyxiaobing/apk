@@ -19,11 +19,11 @@ repository = "https://github.com/hnlyxiaobing/apk"
 
 license = "Apache-2.0"
 
-keywords = [ ]
+keywords = [ "apk", "android", "zip", "signature", "verity" ]
 
 preferred_target = "wasm"
 
-description = ""
+description = "Read-only APK (ZIP) container parser: entry index and raw bytes, v1/v2/v3/v3.1 signature verification, resources.arsc and ELF recon, for Android package tooling."
 
 import {
   "bobzhang/zip@0.1.2",
